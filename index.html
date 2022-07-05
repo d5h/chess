@@ -23,7 +23,21 @@
     <canvas id="glcanvas" tabindex='1'></canvas>
     <!-- Minified and statically hosted version of https://github.com/not-fl3/macroquad/blob/master/js/mq_js_bundle.js -->
     <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
-    <script>load("xxxxxx.wasm");</script> <!-- Your compiled wasm file -->
+    <script>
+        register_plugin = function (importObject) {
+            importObject.env.console_log = (len_and_ptr) => {
+                let len = len_and_ptr >> 24;
+                let ptr = len_and_ptr & 0xffffff;
+                let memory = wasm_memory.buffer;  // From miniquad
+                let buffer = new Uint8Array(memory, ptr, len);
+                let utf8dec = new TextDecoder("utf-8");
+                let out = utf8dec.decode(buffer);
+                console.log(out);
+            }
+        };
+        miniquad_add_plugin({register_plugin});
+        load("xxxxxx.wasm");
+    </script> <!-- Your compiled wasm file -->
 </body>
 
 </html>
