@@ -1,4 +1,4 @@
-#![feature(type_alias_impl_trait)]
+#![feature(trait_alias)]
 
 use std::collections::HashMap;
 
@@ -12,10 +12,10 @@ mod prelude {
 
 use prelude::*;
 
-type SetupRuleFn = impl Fn() -> Vec<(usize, usize, String)>;
+trait SetupRuleFn = Fn() -> Vec<(usize, usize, String)>;
 
 struct Rules {
-    pub setup_rules: HashMap<String, Box<SetupRuleFn>>,
+    pub setup_rules: HashMap<String, Box<dyn SetupRuleFn>>,
     pub piece_name_to_offsets: HashMap<String, (usize, usize)>,
 }
 
@@ -88,15 +88,15 @@ impl Game {
     }
 
     fn rc_to_xy(&self, r: usize, c: usize) -> (f32, f32) {
-        let y = (8 - r) as f32 * SQUARE_SIZE;  // TODO: get board size from rules
+        let y = (8 - r) as f32 * SQUARE_SIZE; // TODO: get board size from rules
         let x = (c - 1) as f32 * SQUARE_SIZE;
         (x, y)
     }
 }
 
 impl Rules {
-    pub fn default_setup_rules() -> HashMap<String, Box<SetupRuleFn>> {
-        let mut hm = HashMap::new();
+    pub fn default_setup_rules() -> HashMap<String, Box<dyn SetupRuleFn>> {
+        let mut hm = HashMap::<String, Box<dyn SetupRuleFn>>::new();
         hm.insert(
             "pawns".to_string(),
             Box::new(|| {
@@ -109,16 +109,60 @@ impl Rules {
                 p
             }),
         );
+        hm.insert(
+            "rooks".to_string(),
+            Box::new(|| {
+                vec![
+                    (1, 1, "R".to_string()),
+                    (1, 8, "R".to_string()),
+                    (8, 1, "r".to_string()),
+                    (8, 8, "r".to_string()),
+                ]
+            }),
+        );
+        hm.insert(
+            "knights".to_string(),
+            Box::new(|| {
+                vec![
+                    (1, 2, "N".to_string()),
+                    (1, 7, "N".to_string()),
+                    (8, 2, "n".to_string()),
+                    (8, 7, "n".to_string()),
+                ]
+            }),
+        );
+        hm.insert(
+            "bishops".to_string(),
+            Box::new(|| {
+                vec![
+                    (1, 3, "B".to_string()),
+                    (1, 6, "B".to_string()),
+                    (8, 3, "b".to_string()),
+                    (8, 6, "b".to_string()),
+                ]
+            }),
+        );
+        hm.insert(
+            "queens".to_string(),
+            Box::new(|| vec![(1, 4, "Q".to_string()), (8, 4, "q".to_string())]),
+        );
+        hm.insert(
+            "kings".to_string(),
+            Box::new(|| vec![(1, 5, "K".to_string()), (8, 5, "k".to_string())]),
+        );
         hm
     }
 
     pub fn default_piece_name_to_offsets() -> HashMap<String, (usize, usize)> {
         let mut hm = HashMap::new();
-        hm.insert("P".to_string(), (5 * SQUARE_SIZE as usize, 0));
-        hm.insert(
-            "p".to_string(),
-            (5 * SQUARE_SIZE as usize, SQUARE_SIZE as usize),
-        );
+        let pieces = ["k", "q", "b", "n", "r", "p"];
+        for (i, p) in pieces.iter().enumerate() {
+            hm.insert(p.to_uppercase(), (i * SQUARE_SIZE as usize, 0));
+            hm.insert(
+                p.to_lowercase(),
+                (i * SQUARE_SIZE as usize, SQUARE_SIZE as usize),
+            );
+        }
         hm
     }
 }
