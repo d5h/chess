@@ -19,10 +19,23 @@ struct Rules {
     pub piece_name_to_offsets: HashMap<String, (usize, usize)>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DraggingState {
+    pub source_rc: (usize, usize),
+    pub piece_off_x: f32,
+    pub piece_off_y: f32,
+}
+
+enum InputState {
+    NotDragging,
+    Dragging(DraggingState),
+}
+
 struct Game {
     pieces_sprite: Texture2D,
     piece_placements: HashMap<(usize, usize), String>,
     rules: Rules,
+    input: InputState,
 }
 
 impl Game {
@@ -36,6 +49,7 @@ impl Game {
                 setup_rules: Rules::default_setup_rules(),
                 piece_name_to_offsets: Rules::default_piece_name_to_offsets(),
             },
+            input: InputState::NotDragging,
         };
         s.setup();
         s
@@ -53,6 +67,40 @@ impl Game {
     pub fn draw(&self) {
         self.draw_board();
         self.draw_pieces();
+    }
+
+    pub fn handle_input(&mut self) {
+        let pos = mouse_position();
+        let r = 8 - (pos.1 as usize / SQUARE_SIZE as usize); // TODO: get from rules
+        let c = 1 + pos.0 as usize / SQUARE_SIZE as usize;
+        match self.input {
+            InputState::NotDragging => {
+                if is_mouse_button_pressed(MouseButton::Left) {
+                    log!("Clicked ({}, {})", r, c);
+                    if self.piece_placements.contains_key(&(r, c)) {
+                        self.input = InputState::Dragging(DraggingState {
+                            source_rc: (r, c),
+                            piece_off_x: pos.0 % SQUARE_SIZE,
+                            piece_off_y: pos.1 % SQUARE_SIZE,
+                        })
+                    }
+                }
+            }
+            InputState::Dragging(drag) => {
+                if is_mouse_button_released(MouseButton::Left) {
+                    log!("Released ({}, {})", r, c);
+                    if 1 <= r && r <= 8 && 1 <= c && c <= 8 {  // TODO: check rules
+                        if let Some(source_piece) = self.piece_placements.get(&drag.source_rc) {
+                            let piece = source_piece.clone();
+                            self.piece_placements.remove(&drag.source_rc);
+                            self.piece_placements.remove(&(r, c));
+                            self.piece_placements.insert((r, c), piece);
+                        }
+                    }
+                    self.input = InputState::NotDragging;
+                }
+            }
+        }
     }
 
     fn draw_board(&self) {
@@ -73,7 +121,13 @@ impl Game {
 
     fn draw_pieces(&self) {
         for ((r, c), n) in self.piece_placements.iter() {
-            let (x, y) = self.rc_to_xy(*r, *c);
+            let (x, y) = match self.input {
+                InputState::Dragging(drag) if drag.source_rc == (*r, *c) => {
+                    let pos = mouse_position();
+                    (pos.0 - drag.piece_off_x, pos.1 - drag.piece_off_y)
+                },
+                _ => self.rc_to_xy(*r, *c),
+            };
             if let Some((sx, sy)) = self.rules.piece_name_to_offsets.get(n) {
                 draw_texture_ex(
                     self.pieces_sprite,
@@ -171,9 +225,10 @@ impl Rules {
 
 #[macroquad::main("Chess")]
 async fn main() {
-    let game = Game::new().await;
+    let mut game = Game::new().await;
     loop {
         game.draw();
+        game.handle_input();
         next_frame().await
     }
 }
