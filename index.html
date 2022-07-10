@@ -2,7 +2,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>xxxxxx</title>
+    <title>Chess</title>
     <style>
         html,
         body,
@@ -24,55 +24,37 @@
     <div><canvas id="glcanvas" tabindex='1'></canvas></div>
     <!-- Minified and statically hosted version of https://github.com/not-fl3/macroquad/blob/master/js/mq_js_bundle.js -->
     <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
-    <script>
-        // TODO: put these in a separate JS file
-        register_plugin = function (importObject) {
-            importObject.env.console_log = (len_and_ptr) => {
-                // TODO: This should be able to take two args
-                let len = len_and_ptr >> 24;
-                let ptr = len_and_ptr & 0xffffff;
-                let memory = wasm_memory.buffer;  // From miniquad
-                let buffer = new Uint8Array(memory, ptr, len);
-                let utf8dec = new TextDecoder("utf-8");
-                let out = utf8dec.decode(buffer);
-                console.log(out);
-            };
-            importObject.env.movement_rule = (piece_ptr, placements_ptr, retval_ptr, retval_len) => {
-                // Put this stuff in a wrapper
-                let memory = wasm_memory.buffer;
-                let piece_arr = new Uint8Array(memory, piece_ptr, 3);
-                let row = piece_arr[0];
-                let col = piece_arr[1];
-                let name = piece_arr[2];
-                let name_str = String.fromCharCode(name);
-                let stride = 8 + 1;  // Get these constants from Rust
-                let placements = new Uint8Array(memory, placements_ptr, (8 + 1) * stride);
-                let retval = new Uint8Array(memory, retval_ptr, retval_len);
-                let ri = 0;
-                console.log(`Movement plugin called: (${row}, ${col}, ${name} (${name_str}))`);
+    <script type="module">
+        import { init, register_movement_rule } from "/assets/js/rules.js";
+        init();
 
-                let input = document.getElementById("backward-pawn-moves");
-                if (!input.checked)
-                    return;
+        function movement_rule(rule) {
+            let input = document.getElementById("backward-pawn-moves");
+            if (!input.checked)
+                return;
 
-                // Actual rule logic
-                let dir = name_str == name_str.toUpperCase() ? -1 : 1;
-                let max = (dir == 1 && row == 5) || (dir == -1 && row == 4)? 2 : 1;
-                for (let i = 1; i <= max; ++i) {
-                    let new_row = row + dir * i;
-                    if (new_row <= 8 && placements[new_row * stride + col] === 0) {
-                        retval[ri] = new_row;
-                        retval[ri + 1] = col;
-                        retval[ri + 2] = name;
-                        ri += 3;
-                        console.log(`Allow movement: (${new_row}, ${col}, ${name_str})`);
-                    }
+            // This rule only applies to pawns
+            if (rule.piece_name.toUpperCase() !== "P")
+                return;
+
+            // Check if it's a white piece (uppercase) or black piece (lowercase)
+            let dir = rule.piece_name == rule.piece_name.toUpperCase() ? -1 : 1;
+            // It can move 2 spaces if on the 4th (if white) or 5th (if black) rank
+            let max = (dir == -1 && rule.row == 4) || (dir == 1 && rule.row == 5)? 2 : 1;
+            // Add the allowed moves
+            for (let i = 1; i <= max; ++i) {
+                let new_row = rule.row + dir * i;
+                // Don't allow moving off the board or onto another piece
+                if (0 <= new_row && new_row <= 8 && !rule.piece_at(new_row, rule.col)) {
+                    rule.add_allowed_move(new_row, rule.col, rule.piece_name);
+                    console.log(`Allow movement: (${new_row}, ${rule.col}, ${rule.piece_name})`);
                 }
             }
-        };
-        miniquad_add_plugin({register_plugin});
-        load("xxxxxx.wasm");
-    </script> <!-- Your compiled wasm file -->
+        }
+
+        register_movement_rule(movement_rule);
+        load("chess.wasm");
+    </script>
     <div><input id="backward-pawn-moves" type="checkbox" />Backward pawn moves</div>
 </body>
 

@@ -37,7 +37,7 @@ trait SetupRuleFn = Fn() -> Vec<Piece>;
 trait MovementRuleFn = Fn(Piece, &PiecePlacements) -> HashSet<Piece>;
 
 extern "C" {
-    fn movement_rule(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
+    fn movement_plugin(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
 }
 
 struct Rules {
@@ -303,12 +303,12 @@ fn plugin_movement_rule(p: Piece, pp: &PiecePlacements) -> HashSet<Piece> {
     let mut hs = HashSet::new();
     let piece_ptr: *const Piece = &p;
     let placements_ptr: *const [u8; 8 + 1] = pp.as_ptr();
-    const retval_len: usize = 3 * (8 + 1) * (8 + 1) * 95;
-    let mut retval: [u8; retval_len] = [0; retval_len];
+    const RETVAL_LEN: usize = 3 * 8 * 8 * 95;
+    let mut retval: [u8; RETVAL_LEN] = [0; RETVAL_LEN];
     let retval_ptr: *const u8 = retval.as_mut_ptr();
-    unsafe { movement_rule(piece_ptr as u32, placements_ptr as u32, retval_ptr as u32, retval_len as u32); }
+    unsafe { movement_plugin(piece_ptr as u32, placements_ptr as u32, retval_ptr as u32, RETVAL_LEN as u32); }
     let mut i = 0;
-    while i < retval_len {
+    while i < RETVAL_LEN {
         if retval[i] == 0 {
             break;
         }
