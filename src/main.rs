@@ -1,6 +1,7 @@
 #![feature(trait_alias)]
 
 use std::collections::{HashMap, HashSet};
+use std::panic;
 
 use macroquad::prelude::*;
 
@@ -12,15 +13,35 @@ mod prelude {
 
 use prelude::*;
 
-type Piece = (usize, usize, String);
-type PiecePlacements = HashMap<(usize, usize), String>;
+// We need to marshal Piece data from Rust to JS efficiently. We'll use a representation that can
+// be easily and efficiently accessed from JS. This allows JS to directly read and write WASM
+// memory, and avoid having to copy data more than necessary.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[repr(C, packed)]
+struct Piece {
+    row: u8,
+    col: u8,
+    name: u8,  // ASCII character
+}
+// We want a data structure that allows us to quickly lookup what piece is on which square.
+// Here again though, we need to marshal this data to and from JS. Hence, we can't use anything
+// fancy like a HashMap. We'll represent the board as a 2x2 array of u8, where the value is the
+// piece name (ASCII char), or 0 if the square is empty. We add 1 to each dimension because we
+// index it starting with 1, in accordance with traditional chess notation, to avoid confusion.
+type PiecePlacements = [[u8; 8 + 1]; 8 + 1];  // TODO: don't hardcode board dimensions
 
 trait SetupRuleFn = Fn() -> Vec<Piece>;
 // FIXME: will also need game history for castling and en passant
-trait MovementRuleFn = Fn(&Piece, &PiecePlacements) -> HashSet<Piece>;
+// FIXME: need to be able to remove a piece on a different square than where the piece moves
+//        for en passant
+trait MovementRuleFn = Fn(Piece, &PiecePlacements) -> HashSet<Piece>;
+
+extern "C" {
+    fn movement_rule(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
+}
 
 struct Rules {
-    pub piece_name_to_offsets: HashMap<String, (usize, usize)>,
+    pub piece_name_to_offsets: HashMap<u8, (usize, usize)>,
     pub setup_rules: HashMap<String, Box<dyn SetupRuleFn>>,
     pub movement_rules: HashMap<String, Box<dyn MovementRuleFn>>,
 }
@@ -50,7 +71,7 @@ impl Game {
             pieces_sprite: load_texture("assets/pieces.png")
                 .await
                 .expect("Couldn't load pieces sprint sheet"),
-            piece_placements: HashMap::new(),
+            piece_placements: [[0; 8 + 1]; 8 + 1],
             rules: Rules {
                 piece_name_to_offsets: Rules::default_piece_name_to_offsets(),
                 setup_rules: Rules::default_setup_rules(),
@@ -65,8 +86,8 @@ impl Game {
     fn setup(&mut self) {
         for (_, r) in self.rules.setup_rules.iter() {
             let pieces = r();
-            for (r, c, n) in pieces.iter() {
-                self.piece_placements.insert((*r, *c), n.to_string());
+            for Piece {row: r, col: c, name: n } in pieces.iter() {
+                self.piece_placements[*r as usize][*c as usize] = *n;
             }
         }
     }
@@ -84,7 +105,7 @@ impl Game {
             InputState::NotDragging => {
                 if is_mouse_button_pressed(MouseButton::Left) {
                     log!("Clicked ({}, {})", r, c);
-                    if self.piece_placements.contains_key(&(r, c)) {
+                    if self.piece_placements[r][c] != 0 {
                         self.input = InputState::Dragging(DraggingState {
                             source_rc: (r, c),
                             piece_off_x: pos.0 % SQUARE_SIZE,
@@ -99,12 +120,13 @@ impl Game {
                     // TODO: we might not need to check bounds, because macroquad doesn't seem to
                     // track the mouse outside of the canvas. Get bounds from rules anyway.
                     if 1 <= r && r <= 8 && 1 <= c && c <= 8 {
-                        if let Some(source_piece) = self.piece_placements.get(&drag.source_rc) {
-                            if self.is_legal(source_piece, drag.source_rc, (r, c)) {
-                                let piece = source_piece.clone();
-                                self.piece_placements.remove(&drag.source_rc);
-                                self.piece_placements.remove(&(r, c));
-                                self.piece_placements.insert((r, c), piece);
+                        let (sr, sc) = drag.source_rc;
+                        let name = self.piece_placements[sr][sc];
+                        if name != 0 {
+                            let source_piece = Piece{ row: sr as u8, col: sc as u8, name };
+                            if self.is_legal(source_piece, (r, c)) {
+                                self.piece_placements[sr][sc] = 0;
+                                self.piece_placements[r][c] = name;
                             }
                         }
                     }
@@ -114,11 +136,10 @@ impl Game {
         }
     }
 
-    fn is_legal(&self, piece_name: &str, from: (usize, usize), to: (usize, usize)) -> bool {
+    fn is_legal(&self, piece: Piece, to: (usize, usize)) -> bool {
         for (_, r) in self.rules.movement_rules.iter() {
-            let piece = (from.0, from.1, piece_name.to_string());  // TODO: avoid to_string 
-            let allowed = r(&piece, &self.piece_placements);
-            if allowed.contains(&(to.0, to.1, piece_name.to_string())) {
+            let allowed = r(piece, &self.piece_placements);
+            if allowed.contains(&Piece { row: to.0 as u8, col: to.1 as u8, name: piece.name}) {
                 return true;
             }
         }
@@ -142,25 +163,30 @@ impl Game {
     }
 
     fn draw_pieces(&self) {
-        for ((r, c), n) in self.piece_placements.iter() {
-            let (x, y) = match self.input {
-                InputState::Dragging(drag) if drag.source_rc == (*r, *c) => {
-                    let pos = mouse_position();
-                    (pos.0 - drag.piece_off_x, pos.1 - drag.piece_off_y)
-                },
-                _ => self.rc_to_xy(*r, *c),
-            };
-            if let Some((sx, sy)) = self.rules.piece_name_to_offsets.get(n) {
-                draw_texture_ex(
-                    self.pieces_sprite,
-                    x,
-                    y,
-                    WHITE,
-                    DrawTextureParams {
-                        source: Some(Rect::new(*sx as f32, *sy as f32, SQUARE_SIZE, SQUARE_SIZE)),
-                        ..Default::default()
-                    },
-                );
+        for r in 1..=8 {  // TODO: don't hard code board dimensions
+            for c in 1..=8 {
+                let n = self.piece_placements[r][c];
+                if n != 0 {
+                    let (x, y) = match self.input {
+                        InputState::Dragging(drag) if drag.source_rc == (r, c) => {
+                            let pos = mouse_position();
+                            (pos.0 - drag.piece_off_x, pos.1 - drag.piece_off_y)
+                        },
+                        _ => self.rc_to_xy(r, c),
+                    };
+                    if let Some((sx, sy)) = self.rules.piece_name_to_offsets.get(&n) {
+                        draw_texture_ex(
+                            self.pieces_sprite,
+                            x,
+                            y,
+                            WHITE,
+                            DrawTextureParams {
+                                source: Some(Rect::new(*sx as f32, *sy as f32, SQUARE_SIZE, SQUARE_SIZE)),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -173,13 +199,13 @@ impl Game {
 }
 
 impl Rules {
-    pub fn default_piece_name_to_offsets() -> HashMap<String, (usize, usize)> {
+    pub fn default_piece_name_to_offsets() -> HashMap<u8, (usize, usize)> {
         let mut hm = HashMap::new();
-        let pieces = ["k", "q", "b", "n", "r", "p"];
+        let pieces = ['k', 'q', 'b', 'n', 'r', 'p'];
         for (i, p) in pieces.iter().enumerate() {
-            hm.insert(p.to_uppercase(), (i * SQUARE_SIZE as usize, 0));
+            hm.insert(p.to_uppercase().nth(0).unwrap() as u8, (i * SQUARE_SIZE as usize, 0));
             hm.insert(
-                p.to_lowercase(),
+                *p as u8,
                 (i * SQUARE_SIZE as usize, SQUARE_SIZE as usize),
             );
         }
@@ -194,8 +220,8 @@ impl Rules {
                 let mut p = Vec::new();
                 for c in 1..=8 {
                     // TODO: get from rules
-                    p.push((2 as usize, c as usize, "P".to_string()));
-                    p.push((7 as usize, c as usize, "p".to_string()));
+                    p.push(Piece { row: 2, col: c, name: 'P' as u8});
+                    p.push(Piece { row: 7, col: c, name: 'p' as u8});
                 }
                 p
             }),
@@ -204,10 +230,10 @@ impl Rules {
             "rooks".to_string(),
             Box::new(|| {
                 vec![
-                    (1, 1, "R".to_string()),
-                    (1, 8, "R".to_string()),
-                    (8, 1, "r".to_string()),
-                    (8, 8, "r".to_string()),
+                    Piece { row: 1, col: 1, name: 'R' as u8 },
+                    Piece { row: 1, col: 8, name: 'R' as u8 },
+                    Piece { row: 8, col: 1, name: 'r' as u8 },
+                    Piece { row: 8, col: 8, name: 'r' as u8 },
                 ]
             }),
         );
@@ -215,10 +241,10 @@ impl Rules {
             "knights".to_string(),
             Box::new(|| {
                 vec![
-                    (1, 2, "N".to_string()),
-                    (1, 7, "N".to_string()),
-                    (8, 2, "n".to_string()),
-                    (8, 7, "n".to_string()),
+                    Piece { row: 1, col: 2, name: 'N' as u8},
+                    Piece { row: 1, col: 7, name: 'N' as u8},
+                    Piece { row: 8, col: 2, name: 'n' as u8},
+                    Piece { row: 8, col: 7, name: 'n' as u8},
                 ]
             }),
         );
@@ -226,52 +252,81 @@ impl Rules {
             "bishops".to_string(),
             Box::new(|| {
                 vec![
-                    (1, 3, "B".to_string()),
-                    (1, 6, "B".to_string()),
-                    (8, 3, "b".to_string()),
-                    (8, 6, "b".to_string()),
+                    Piece { row: 1, col: 3, name: 'B' as u8 },
+                    Piece { row: 1, col: 6, name: 'B' as u8 },
+                    Piece { row: 8, col: 3, name: 'b' as u8 },
+                    Piece { row: 8, col: 6, name: 'b' as u8 },
                 ]
             }),
         );
         hm.insert(
             "queens".to_string(),
-            Box::new(|| vec![(1, 4, "Q".to_string()), (8, 4, "q".to_string())]),
+            Box::new(|| vec![Piece { row: 1, col: 4, name: 'Q' as u8}, Piece { row: 8, col: 4, name: 'q' as u8}]),
         );
         hm.insert(
             "kings".to_string(),
-            Box::new(|| vec![(1, 5, "K".to_string()), (8, 5, "k".to_string())]),
+            Box::new(|| vec![Piece { row: 1, col: 5, name: 'K' as u8}, Piece { row: 8, col: 5, name: 'k' as u8}]),
         );
         hm
     }
 
     pub fn default_movement_rules() -> HashMap<String, Box<dyn MovementRuleFn>> {
         let mut hm = HashMap::<String, Box<dyn MovementRuleFn>>::new();
-        hm.insert("pawn-movement".to_string(), Box::new(|p: &Piece, pp: &PiecePlacements| {
+        hm.insert("pawn-movement".to_string(), Box::new(|p: Piece, pp: &PiecePlacements| {
             let mut hs = HashSet::new();
-            let dir: i32 = if p.2.chars().nth(0).unwrap().is_uppercase() {
+            let dir: i32 = if (p.name as char).is_uppercase() {
                 1
             } else {
                 -1
             };
-            let max = if (dir == 1 && p.0 == 2) || (dir == -1 && p.0 == 7) {
+            let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
                 2
             } else {
                 1
             };
             for i in 1..=max {
-                let rc = ((p.0 as i32 + dir * i) as usize, p.1);
-                if rc.0 <= 8 && !pp.contains_key(&rc) {
-                    hs.insert((rc.0, rc.1, p.2.to_string()));
+                let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
+                if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
+                    hs.insert(Piece { row: rc.0 as u8, col: rc.1 as u8, name: p.name});
                 }
             }
             hs
+        }));
+        hm.insert("js-plugin".to_string(), Box::new(|p: Piece, pp: &PiecePlacements| {
+            plugin_movement_rule(p, pp)
         }));
         hm
     }
 }
 
+fn plugin_movement_rule(p: Piece, pp: &PiecePlacements) -> HashSet<Piece> {
+    let mut hs = HashSet::new();
+    let piece_ptr: *const Piece = &p;
+    let placements_ptr: *const [u8; 8 + 1] = pp.as_ptr();
+    const retval_len: usize = 3 * (8 + 1) * (8 + 1) * 95;
+    let mut retval: [u8; retval_len] = [0; retval_len];
+    let retval_ptr: *const u8 = retval.as_mut_ptr();
+    unsafe { movement_rule(piece_ptr as u32, placements_ptr as u32, retval_ptr as u32, retval_len as u32); }
+    let mut i = 0;
+    while i < retval_len {
+        if retval[i] == 0 {
+            break;
+        }
+        let (r, c, n) = (retval[i], retval[i + 1], retval[i + 2]);
+        // FIXME: do some checks here
+        hs.insert(Piece { row: r, col: c, name: n });
+        i += 3;
+    }
+    hs
+}
+
+pub fn hook(info: &panic::PanicInfo) {
+    log!("{}", info.to_string());
+}
+
 #[macroquad::main("Chess")]
 async fn main() {
+    panic::set_hook(Box::new(hook));
     let mut game = Game::new().await;
     loop {
         game.draw();
