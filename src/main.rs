@@ -27,7 +27,7 @@ struct Piece {
 // Here again though, we need to marshal this data to and from JS. Hence, we can't use anything
 // fancy like a HashMap. We'll represent the board as a 2x2 array of u8, where the value is the
 // piece name (ASCII char), or 0 if the square is empty. We add 1 to each dimension because we
-// index it starting with 1, in accordance with traditional chess notation, to avoid confusion.
+// index it starting with 1, in accordance with traditional chess notation.
 type PiecePlacements = [[u8; 8 + 1]; 8 + 1];  // TODO: don't hardcode board dimensions
 
 trait SetupRuleFn = Fn() -> Vec<Piece>;
@@ -37,15 +37,20 @@ trait SetupRuleFn = Fn() -> Vec<Piece>;
 trait MovementRuleFn = Fn(Piece, &PiecePlacements) -> HashSet<Piece>;
 
 extern "C" {
+    // JS plugins
     fn movement_plugin(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
 }
 
-struct Rules {
+struct Rules<'a> {
+    // Key: piece ASCII code. Value: coordinates in sprite sheet.
     pub piece_name_to_offsets: HashMap<u8, (usize, usize)>,
-    pub setup_rules: HashMap<String, Box<dyn SetupRuleFn>>,
-    pub movement_rules: HashMap<String, Box<dyn MovementRuleFn>>,
+    // Key: rule name. Value: a callable that returns some piece locations.
+    pub setup_rules: HashMap<&'a str, Box<dyn SetupRuleFn>>,
+    // Key: rule name. Value: a callable that returns allowed moves for a given piece.
+    pub movement_rules: HashMap<&'a str, Box<dyn MovementRuleFn>>,
 }
 
+// Mouse stuff
 #[derive(Clone, Copy, Debug)]
 struct DraggingState {
     pub source_rc: (usize, usize),
@@ -58,19 +63,19 @@ enum InputState {
     Dragging(DraggingState),
 }
 
-struct Game {
+struct Game<'a> {
     pieces_sprite: Texture2D,
     piece_placements: PiecePlacements,
-    rules: Rules,
+    rules: Rules<'a>,
     input: InputState,
 }
 
-impl Game {
-    pub async fn new() -> Self {
+impl<'a> Game<'a> {
+    pub async fn new() -> Game<'a> {
         let mut s = Self {
-            pieces_sprite: load_texture("assets/pieces.png")
+            pieces_sprite: load_texture("assets/img/pieces.png")
                 .await
-                .expect("Couldn't load pieces sprint sheet"),
+                .expect("Couldn't load pieces sprite sheet"),
             piece_placements: [[0; 8 + 1]; 8 + 1],
             rules: Rules {
                 piece_name_to_offsets: Rules::default_piece_name_to_offsets(),
@@ -198,7 +203,7 @@ impl Game {
     }
 }
 
-impl Rules {
+impl<'a> Rules<'a> {
     pub fn default_piece_name_to_offsets() -> HashMap<u8, (usize, usize)> {
         let mut hm = HashMap::new();
         let pieces = ['k', 'q', 'b', 'n', 'r', 'p'];
@@ -212,10 +217,10 @@ impl Rules {
         hm
     }
 
-    pub fn default_setup_rules() -> HashMap<String, Box<dyn SetupRuleFn>> {
-        let mut hm = HashMap::<String, Box<dyn SetupRuleFn>>::new();
+    pub fn default_setup_rules() -> HashMap<&'a str, Box<dyn SetupRuleFn>> {
+        let mut hm = HashMap::<&'a str, Box<dyn SetupRuleFn>>::new();
         hm.insert(
-            "pawns".to_string(),
+            "pawns",
             Box::new(|| {
                 let mut p = Vec::new();
                 for c in 1..=8 {
@@ -227,7 +232,7 @@ impl Rules {
             }),
         );
         hm.insert(
-            "rooks".to_string(),
+            "rooks",
             Box::new(|| {
                 vec![
                     Piece { row: 1, col: 1, name: 'R' as u8 },
@@ -238,7 +243,7 @@ impl Rules {
             }),
         );
         hm.insert(
-            "knights".to_string(),
+            "knights",
             Box::new(|| {
                 vec![
                     Piece { row: 1, col: 2, name: 'N' as u8},
@@ -249,7 +254,7 @@ impl Rules {
             }),
         );
         hm.insert(
-            "bishops".to_string(),
+            "bishops",
             Box::new(|| {
                 vec![
                     Piece { row: 1, col: 3, name: 'B' as u8 },
@@ -260,19 +265,19 @@ impl Rules {
             }),
         );
         hm.insert(
-            "queens".to_string(),
+            "queens",
             Box::new(|| vec![Piece { row: 1, col: 4, name: 'Q' as u8}, Piece { row: 8, col: 4, name: 'q' as u8}]),
         );
         hm.insert(
-            "kings".to_string(),
+            "kings",
             Box::new(|| vec![Piece { row: 1, col: 5, name: 'K' as u8}, Piece { row: 8, col: 5, name: 'k' as u8}]),
         );
         hm
     }
 
-    pub fn default_movement_rules() -> HashMap<String, Box<dyn MovementRuleFn>> {
-        let mut hm = HashMap::<String, Box<dyn MovementRuleFn>>::new();
-        hm.insert("pawn-movement".to_string(), Box::new(|p: Piece, pp: &PiecePlacements| {
+    pub fn default_movement_rules() -> HashMap<&'a str, Box<dyn MovementRuleFn>> {
+        let mut hm = HashMap::<&'a str, Box<dyn MovementRuleFn>>::new();
+        hm.insert("pawn-movement", Box::new(|p: Piece, pp: &PiecePlacements| {
             let mut hs = HashSet::new();
             let dir: i32 = if (p.name as char).is_uppercase() {
                 1
@@ -292,7 +297,7 @@ impl Rules {
             }
             hs
         }));
-        hm.insert("js-plugin".to_string(), Box::new(|p: Piece, pp: &PiecePlacements| {
+        hm.insert("js-plugin", Box::new(|p: Piece, pp: &PiecePlacements| {
             plugin_movement_rule(p, pp)
         }));
         hm

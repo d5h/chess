@@ -6,7 +6,7 @@ class MovementRule {
         this.col = piece_arr[1];
         let piece_ascii = piece_arr[2];
         this.piece_name = String.fromCharCode(piece_ascii);
-        this.stride = 8 + 1;  // Get these constants from Rust
+        this.stride = 8 + 1;  // TODO: Get this constant from Rust
         this.placements = new Uint8Array(memory, placements_ptr, (8 + 1) * this.stride);
         this.retval = new Uint8Array(memory, retval_ptr, retval_len);
         this.ri = 0;
