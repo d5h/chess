@@ -55,7 +55,12 @@ impl<'a> Game<'a> {
     fn setup(&mut self) {
         for (_, r) in self.rules.setup_rules.iter() {
             let pieces = r();
-            for Piece {row: r, col: c, name: n } in pieces.iter() {
+            for Piece {
+                row: r,
+                col: c,
+                name: n,
+            } in pieces.iter()
+            {
                 self.piece_placements[*r as usize][*c as usize] = *n;
             }
         }
@@ -92,7 +97,11 @@ impl<'a> Game<'a> {
                         let (sr, sc) = drag.source_rc;
                         let name = self.piece_placements[sr][sc];
                         if name != 0 {
-                            let source_piece = Piece{ row: sr as u8, col: sc as u8, name };
+                            let source_piece = Piece {
+                                row: sr as u8,
+                                col: sc as u8,
+                                name,
+                            };
                             if self.is_legal(source_piece, (r, c)) {
                                 self.piece_placements[sr][sc] = 0;
                                 self.piece_placements[r][c] = name;
@@ -108,7 +117,11 @@ impl<'a> Game<'a> {
     fn is_legal(&self, piece: Piece, to: (usize, usize)) -> bool {
         for (_, r) in self.rules.movement_rules.iter() {
             let allowed = r(piece, &self.piece_placements);
-            if allowed.contains(&Piece { row: to.0 as u8, col: to.1 as u8, name: piece.name}) {
+            if allowed.contains(&Piece {
+                row: to.0 as u8,
+                col: to.1 as u8,
+                name: piece.name,
+            }) {
                 return true;
             }
         }
@@ -132,7 +145,8 @@ impl<'a> Game<'a> {
     }
 
     fn draw_pieces(&self) {
-        for r in 1..=8 {  // TODO: don't hard code board dimensions
+        for r in 1..=8 {
+            // TODO: don't hard code board dimensions
             for c in 1..=8 {
                 let n = self.piece_placements[r][c];
                 if n != 0 {
@@ -140,7 +154,7 @@ impl<'a> Game<'a> {
                         InputState::Dragging(drag) if drag.source_rc == (r, c) => {
                             let pos = mouse_position();
                             (pos.0 - drag.piece_off_x, pos.1 - drag.piece_off_y)
-                        },
+                        }
                         _ => self.rc_to_xy(r, c),
                     };
                     if let Some((sx, sy)) = self.rules.piece_name_to_offsets.get(&n) {
@@ -150,7 +164,12 @@ impl<'a> Game<'a> {
                             y,
                             WHITE,
                             DrawTextureParams {
-                                source: Some(Rect::new(*sx as f32, *sy as f32, SQUARE_SIZE, SQUARE_SIZE)),
+                                source: Some(Rect::new(
+                                    *sx as f32,
+                                    *sy as f32,
+                                    SQUARE_SIZE,
+                                    SQUARE_SIZE,
+                                )),
                                 ..Default::default()
                             },
                         );
