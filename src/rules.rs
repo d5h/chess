@@ -45,6 +45,16 @@ pub struct Rules<'a> {
     pub movement_rules: HashMap<&'a str, MovementRule>,
 }
 
+impl Piece {
+    pub fn is_white(&self) -> bool {
+        is_piece_white(self.name)
+    }
+}
+
+fn is_piece_white(n: u8) -> bool {
+    (n as char).is_ascii_uppercase()
+}
+
 impl<'a> Rules<'a> {
     pub fn defaults() -> Self {
         Self {
@@ -214,11 +224,7 @@ impl<'a> Rules<'a> {
             MovementRule {
                 piece_constrait: Some('p'),
                 f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
-                    let dir: i32 = if (p.name as char).is_uppercase() {
-                        1
-                    } else {
-                        -1
-                    };
+                    let dir: i32 = if p.is_white() { 1 } else { -1 };
                     let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
                         2
                     } else {
@@ -242,22 +248,18 @@ impl<'a> Rules<'a> {
             MovementRule {
                 piece_constrait: Some('p'),
                 f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
-                    let dir: i32 = if (p.name as char).is_uppercase() {
-                        1
-                    } else {
-                        -1
-                    };
-                    let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
-                        2
-                    } else {
-                        1
-                    };
-                    for i in 1..=max {
-                        let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
-                        if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
+                    let dir: i8 = if p.is_white() { 1 } else { -1 };
+                    for i in [-1, 1] {
+                        let r = (p.row as i8 + dir) as usize;
+                        let c = (p.col as i8 + i) as usize;
+                        if 1 <= c
+                            && c <= 8
+                            && pp[r][c] != 0
+                            && is_piece_white(pp[r][c]) != p.is_white()
+                        {
                             hs.insert(Piece {
-                                row: rc.0 as u8,
-                                col: rc.1 as u8,
+                                row: r as u8,
+                                col: c as u8,
                                 name: p.name,
                             });
                         }
@@ -451,6 +453,51 @@ mod tests {
         assert_moves_allowed_eq(board, piece, Vec::new());
     }
 
+    #[test]
+    fn test_pawn_captures() {
+        let board = "
+            rnbqkbnr
+            ppp..ppp
+            ........
+            ...pp...
+            ....P...
+            ........
+            PPPP.PPP
+            RNBQKBNR
+        ";
+        // White
+        let piece = Piece {
+            row: 4,
+            col: 5,
+            name: 'P' as u8,
+        };
+        let allowed = vec![Piece {
+            row: 5,
+            col: 4,
+            name: 'P' as u8,
+        }];
+        assert_moves_allowed_eq(board, piece, allowed);
+        // Black
+        let piece = Piece {
+            row: 5,
+            col: 4,
+            name: 'p' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 4,
+                col: 5,
+                name: 'p' as u8,
+            },
+            Piece {
+                row: 4,
+                col: 4,
+                name: 'p' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
     fn assert_moves_allowed_eq(board: &str, piece: Piece, expect_allowed: Vec<Piece>) {
         let expect_allowed: HashSet<Piece> = expect_allowed.into_iter().collect();
         let rules = Rules::defaults();
@@ -463,7 +510,7 @@ mod tests {
         let board = board.trim();
         let mut placements = [[0; 8 + 1]; 8 + 1];
         for (i, line) in board.split('\n').enumerate() {
-            let r = i + 1;
+            let r = 8 - i;
             for (j, p) in line.trim().chars().enumerate() {
                 let c = j + 1;
                 if p != '.' {
