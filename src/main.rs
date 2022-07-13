@@ -1,4 +1,5 @@
 #![feature(trait_alias)]
+#![feature(let_chains)]
 
 use std::panic;
 
@@ -41,11 +42,7 @@ impl<'a> Game<'a> {
                 .await
                 .expect("Couldn't load pieces sprite sheet"),
             piece_placements: [[0; 8 + 1]; 8 + 1],
-            rules: Rules {
-                piece_name_to_offsets: Rules::default_piece_name_to_offsets(),
-                setup_rules: Rules::default_setup_rules(),
-                movement_rules: Rules::default_movement_rules(),
-            },
+            rules: Rules::defaults(),
             input: InputState::NotDragging,
         };
         s.setup();
@@ -115,17 +112,12 @@ impl<'a> Game<'a> {
     }
 
     fn is_legal(&self, piece: Piece, to: (usize, usize)) -> bool {
-        for (_, r) in self.rules.movement_rules.iter() {
-            let allowed = r(piece, &self.piece_placements);
-            if allowed.contains(&Piece {
-                row: to.0 as u8,
-                col: to.1 as u8,
-                name: piece.name,
-            }) {
-                return true;
-            }
-        }
-        false
+        let allowed = self.rules.allowed_moves(piece, &self.piece_placements);
+        allowed.contains(&Piece {
+            row: to.0 as u8,
+            col: to.1 as u8,
+            name: piece.name,
+        })
     }
 
     fn draw_board(&self) {

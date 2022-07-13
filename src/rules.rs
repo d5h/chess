@@ -23,11 +23,17 @@ pub trait SetupRuleFn = Fn() -> Vec<Piece>;
 // FIXME: will also need game history for castling and en passant
 // FIXME: need to be able to remove a piece on a different square than where the piece moves
 //        for en passant
-pub trait MovementRuleFn = Fn(Piece, &PiecePlacements) -> HashSet<Piece>;
+// FIXME: need to have a rule for resolving checks
+pub trait MovementRuleFn = Fn(Piece, &PiecePlacements, &mut HashSet<Piece>);
 
 extern "C" {
     // JS plugins
     fn movement_plugin(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
+}
+
+pub struct MovementRule {
+    pub f: Box<dyn MovementRuleFn>,
+    pub piece_constrait: Option<char>,
 }
 
 pub struct Rules<'a> {
@@ -36,10 +42,18 @@ pub struct Rules<'a> {
     // Key: rule name. Value: a callable that returns some piece locations.
     pub setup_rules: HashMap<&'a str, Box<dyn SetupRuleFn>>,
     // Key: rule name. Value: a callable that returns allowed moves for a given piece.
-    pub movement_rules: HashMap<&'a str, Box<dyn MovementRuleFn>>,
+    pub movement_rules: HashMap<&'a str, MovementRule>,
 }
 
 impl<'a> Rules<'a> {
+    pub fn defaults() -> Self {
+        Self {
+            piece_name_to_offsets: Self::default_piece_name_to_offsets(),
+            setup_rules: Self::default_setup_rules(),
+            movement_rules: Self::default_movement_rules(),
+        }
+    }
+
     pub fn default_piece_name_to_offsets() -> HashMap<u8, (usize, usize)> {
         let mut hm = HashMap::new();
         let pieces = ['k', 'q', 'b', 'n', 'r', 'p'];
@@ -193,47 +207,95 @@ impl<'a> Rules<'a> {
         hm
     }
 
-    pub fn default_movement_rules() -> HashMap<&'a str, Box<dyn MovementRuleFn>> {
-        let mut hm = HashMap::<&'a str, Box<dyn MovementRuleFn>>::new();
+    pub fn default_movement_rules() -> HashMap<&'a str, MovementRule> {
+        let mut hm = HashMap::<&'a str, MovementRule>::new();
         hm.insert(
             "pawn-movement",
-            Box::new(|p: Piece, pp: &PiecePlacements| {
-                let mut hs = HashSet::new();
-                let dir: i32 = if (p.name as char).is_uppercase() {
-                    1
-                } else {
-                    -1
-                };
-                let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
-                    2
-                } else {
-                    1
-                };
-                for i in 1..=max {
-                    let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
-                    if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
-                        hs.insert(Piece {
-                            row: rc.0 as u8,
-                            col: rc.1 as u8,
-                            name: p.name,
-                        });
+            MovementRule {
+                piece_constrait: Some('p'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    let dir: i32 = if (p.name as char).is_uppercase() {
+                        1
+                    } else {
+                        -1
+                    };
+                    let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
+                        2
+                    } else {
+                        1
+                    };
+                    for i in 1..=max {
+                        let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
+                        if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
+                            hs.insert(Piece {
+                                row: rc.0 as u8,
+                                col: rc.1 as u8,
+                                name: p.name,
+                            });
+                        }
                     }
-                }
-                hs
-            }),
+                }),
+            },
+        );
+        hm.insert(
+            "pawn-capture",
+            MovementRule {
+                piece_constrait: Some('p'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    let dir: i32 = if (p.name as char).is_uppercase() {
+                        1
+                    } else {
+                        -1
+                    };
+                    let max = if (dir == 1 && p.row == 2) || (dir == -1 && p.row == 7) {
+                        2
+                    } else {
+                        1
+                    };
+                    for i in 1..=max {
+                        let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
+                        if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
+                            hs.insert(Piece {
+                                row: rc.0 as u8,
+                                col: rc.1 as u8,
+                                name: p.name,
+                            });
+                        }
+                    }
+                }),
+            },
         );
         if !cfg!(test) {
             hm.insert(
                 "js-plugin",
-                Box::new(|p: Piece, pp: &PiecePlacements| plugin_movement_rule(p, pp)),
+                MovementRule {
+                    piece_constrait: None,
+                    f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                        plugin_movement_rule(p, pp, hs)
+                    }),
+                },
             );
         }
         hm
     }
+
+    pub fn allowed_moves(
+        &self,
+        piece: Piece,
+        piece_placements: &PiecePlacements,
+    ) -> HashSet<Piece> {
+        let mut allowed: HashSet<Piece> = HashSet::new();
+        for (_, r) in self.movement_rules.iter() {
+            if let Some(p) = r.piece_constrait && p.to_ascii_lowercase() != (piece.name as char).to_ascii_lowercase() {
+                continue;
+            }
+            (r.f)(piece, piece_placements, &mut allowed);
+        }
+        allowed
+    }
 }
 
-fn plugin_movement_rule(p: Piece, pp: &PiecePlacements) -> HashSet<Piece> {
-    let mut hs = HashSet::new();
+fn plugin_movement_rule(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>) {
     let piece_ptr: *const Piece = &p;
     let placements_ptr: *const [u8; 8 + 1] = pp.as_ptr();
     const RETVAL_LEN: usize = 3 * 8 * 8 * 95;
@@ -261,7 +323,6 @@ fn plugin_movement_rule(p: Piece, pp: &PiecePlacements) -> HashSet<Piece> {
         });
         i += 3;
     }
-    hs
 }
 
 #[cfg(test)]
@@ -391,18 +452,11 @@ mod tests {
     }
 
     fn assert_moves_allowed_eq(board: &str, piece: Piece, expect_allowed: Vec<Piece>) {
-        let mut expect_allowed: HashSet<Piece> = expect_allowed.into_iter().collect();
-        let rules = Rules::default_movement_rules();
+        let expect_allowed: HashSet<Piece> = expect_allowed.into_iter().collect();
+        let rules = Rules::defaults();
         let placements = string_board_to_placements(board);
-        for (_, r) in rules.iter() {
-            let allowed = r(piece, &placements);
-            for p in allowed.iter() {
-                assert!(expect_allowed.contains(p));
-                // Test that we can't have multiple rules allow the same moves
-                expect_allowed.remove(p);
-            }
-        }
-        assert!(expect_allowed.is_empty());
+        let allowed = rules.allowed_moves(piece, &placements);
+        assert_eq!(allowed, expect_allowed);
     }
 
     fn string_board_to_placements(board: &str) -> PiecePlacements {
