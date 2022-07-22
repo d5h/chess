@@ -32,6 +32,7 @@ struct Game<'a> {
     pieces_sprite: Texture2D,
     piece_placements: PiecePlacements,
     rules: Rules<'a>,
+    game_data: GameData,
     input: InputState,
 }
 
@@ -43,6 +44,7 @@ impl<'a> Game<'a> {
                 .expect("Couldn't load pieces sprite sheet"),
             piece_placements: [[0; 8 + 1]; 8 + 1],
             rules: Rules::defaults(),
+            game_data: GameData { ply: 1 },
             input: InputState::NotDragging,
         };
         s.setup();
@@ -102,6 +104,7 @@ impl<'a> Game<'a> {
                             if self.is_legal(source_piece, (r, c)) {
                                 self.piece_placements[sr][sc] = 0;
                                 self.piece_placements[r][c] = name;
+                                self.game_data.ply += 1;
                             }
                         }
                     }
@@ -112,12 +115,24 @@ impl<'a> Game<'a> {
     }
 
     fn is_legal(&self, piece: Piece, to: (usize, usize)) -> bool {
+        if !self.is_turn(piece) {
+            return false;
+        }
         let allowed = self.rules.allowed_moves(piece, &self.piece_placements);
         allowed.contains(&Piece {
             row: to.0 as u8,
             col: to.1 as u8,
             name: piece.name,
         })
+    }
+
+    fn is_turn(&self, piece: Piece) -> bool {
+        for (_, r) in self.rules.turn_rules.iter() {
+            if r(piece, self.game_data) {
+                return true;
+            }
+        }
+        return false;
     }
 
     fn draw_board(&self) {

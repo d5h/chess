@@ -19,7 +19,14 @@ pub struct Piece {
 // index it starting with 1, in accordance with traditional chess notation.
 pub type PiecePlacements = [[u8; 8 + 1]; 8 + 1]; // TODO: don't hardcode board dimensions
 
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[repr(C, packed)]
+pub struct GameData {
+    pub ply: u16,
+}
+
 pub trait SetupRuleFn = Fn() -> Vec<Piece>;
+pub trait TurnRuleFn = Fn(Piece, GameData) -> bool;
 // FIXME: will also need game history for castling and en passant
 // FIXME: need to be able to remove a piece on a different square than where the piece moves
 //        for en passant
@@ -41,6 +48,8 @@ pub struct Rules<'a> {
     pub piece_name_to_offsets: HashMap<u8, (usize, usize)>,
     // Key: rule name. Value: a callable that returns some piece locations.
     pub setup_rules: HashMap<&'a str, Box<dyn SetupRuleFn>>,
+    // Key: rule name. Value: a callable that returns true if the given piece can move.
+    pub turn_rules: HashMap<&'a str, Box<dyn TurnRuleFn>>,
     // Key: rule name. Value: a callable that returns allowed moves for a given piece.
     pub movement_rules: HashMap<&'a str, MovementRule>,
 }
@@ -86,6 +95,7 @@ impl<'a> Rules<'a> {
         Self {
             piece_name_to_offsets: Self::default_piece_name_to_offsets(),
             setup_rules: Self::default_setup_rules(),
+            turn_rules: Self::default_turn_rules(),
             movement_rules: Self::default_movement_rules(),
         }
     }
@@ -239,6 +249,17 @@ impl<'a> Rules<'a> {
                     },
                 ]
             }),
+        );
+        hm
+    }
+
+    pub fn default_turn_rules() -> HashMap<&'a str, Box<dyn TurnRuleFn>> {
+        let mut hm = HashMap::<&'a str, Box<dyn TurnRuleFn>>::new();
+        hm.insert(
+            "player-order",
+            Box::new(|p: Piece, gd: GameData| {
+                p.is_white() == (gd.ply % 2 == 1)
+            })
         );
         hm
     }
