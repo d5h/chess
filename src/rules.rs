@@ -55,6 +55,32 @@ fn is_piece_white(n: u8) -> bool {
     (n as char).is_ascii_uppercase()
 }
 
+
+type Directions = [(i32, i32); 4];
+const AXES: Directions = [(0, 1), (1, 0), (0, -1), (-1, 0)];
+const DIAGONALS: Directions = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
+
+fn add_linear_moves(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>, dirs: &Directions, max: i32) {
+    let is_white = p.is_white();
+    for (x, y) in dirs {
+        for i in 1..=max {
+            let nr = p.row as i32 + y * i;
+            let nc = p.col as i32 + x * i;
+            if !std_in_bounds(nr, nc) {
+                break;
+            }
+            let (nr, nc) = (nr as usize, nc as usize);
+            if pp[nr][nc] != 0 {
+                if is_piece_white(pp[nr][nc]) != is_white {
+                    hs.insert(Piece { row: nr as u8, col: nc as u8, name: p.name });
+                }
+                break;
+            }
+            hs.insert(Piece { row: nr as u8, col: nc as u8, name: p.name });
+        }
+    }
+}
+
 impl<'a> Rules<'a> {
     pub fn defaults() -> Self {
         Self {
@@ -267,6 +293,68 @@ impl<'a> Rules<'a> {
                 }),
             },
         );
+        hm.insert(
+            "knight",
+            MovementRule {
+                piece_constrait: Some('n'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    let is_white = p.is_white();
+                    for (x, y) in [(1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)] {
+                        let nr = p.row as i32 + y;
+                        let nc = p.col as i32 + x;
+                        if !std_in_bounds(nr, nc) {
+                            continue;
+                        }
+                        let (nr, nc) = (nr as usize, nc as usize);
+                        if pp[nr][nc] != 0 {
+                            if is_piece_white(pp[nr][nc]) != is_white {
+                                hs.insert(Piece { row: nr as u8, col: nc as u8, name: p.name });
+                            }
+                        } else {
+                            hs.insert(Piece { row: nr as u8, col: nc as u8, name: p.name });
+                        }
+                    }
+                }),
+            },
+        );
+        hm.insert(
+            "bishop",
+            MovementRule {
+                piece_constrait: Some('b'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    add_linear_moves(p, pp, hs, &DIAGONALS, 8);
+                }),
+            },
+        );
+        hm.insert(
+            "rook",
+            MovementRule {
+                piece_constrait: Some('r'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    add_linear_moves(p, pp, hs, &AXES, 8);
+                }),
+            },
+        );
+        hm.insert(
+            "queen",
+            MovementRule {
+                piece_constrait: Some('q'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    add_linear_moves(p, pp, hs, &AXES, 8);
+                    add_linear_moves(p, pp, hs, &DIAGONALS, 8);
+                }),
+            },
+        );
+        hm.insert(
+            "king",
+            MovementRule {
+                piece_constrait: Some('k'),
+                f: Box::new(|p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>| {
+                    add_linear_moves(p, pp, hs, &AXES, 1);
+                    add_linear_moves(p, pp, hs, &DIAGONALS, 1);
+                }),
+            },
+        );
         if !cfg!(test) {
             hm.insert(
                 "js-plugin",
@@ -295,6 +383,11 @@ impl<'a> Rules<'a> {
         }
         allowed
     }
+}
+
+fn std_in_bounds(r: i32, c: i32) -> bool {
+    // TODO: Get bounds from rules
+    1 <= r && r <= 8 && 1 <= c && c <= 8
 }
 
 fn plugin_movement_rule(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Piece>) {
@@ -493,6 +586,426 @@ mod tests {
                 row: 4,
                 col: 4,
                 name: 'p' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_bishop_moves() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            B.....b.
+        ";
+        // White
+        let piece = Piece {
+            row: 1,
+            col: 1,
+            name: 'B' as u8,
+        };
+        let mut allowed = Vec::new();
+        for i in 2..=8 {
+            allowed.push(Piece {
+                row: i,
+                col: i,
+                name: 'B' as u8,
+            })
+        }
+        assert_moves_allowed_eq(board, piece, allowed);
+        // Black
+        let piece = Piece {
+            row: 1,
+            col: 7,
+            name: 'b' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 2,
+                col: 6,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 3,
+                col: 5,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 4,
+                col: 4,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 5,
+                col: 3,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 6,
+                col: 2,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 7,
+                col: 1,
+                name: 'b' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 8,
+                name: 'b' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_bishop_blocked_and_capture() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            P.b.....
+            .B......
+        ";
+        // White
+        let piece = Piece {
+            row: 1,
+            col: 2,
+            name: 'B' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 2,
+                col: 3,
+                name: 'B' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_knight_moves() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ..N.....
+            ........
+            .......n
+        ";
+        // White
+        let piece = Piece {
+            row: 3,
+            col: 3,
+            name: 'N' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 5,
+                col: 2,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 5,
+                col: 4,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 5,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 4,
+                col: 5,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 2,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 4,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 1,
+                name: 'N' as u8,
+            },
+            Piece {
+                row: 4,
+                col: 1,
+                name: 'N' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+        // Black
+        let piece = Piece {
+            row: 1,
+            col: 8,
+            name: 'n' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 3,
+                col: 7,
+                name: 'n' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 6,
+                name: 'n' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_knight_blocked_and_capture() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            .N......
+            ..n.....
+            N.......
+        ";
+        // White
+        let piece = Piece {
+            row: 1,
+            col: 1,
+            name: 'N' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 2,
+                col: 3,
+                name: 'N' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_rook() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            .P......
+            ........
+            .R..p...
+            ........
+        ";
+        // White
+        let piece = Piece {
+            row: 2,
+            col: 2,
+            name: 'R' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 3,
+                col: 2,
+                name: 'R' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 2,
+                name: 'R' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 1,
+                name: 'R' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 3,
+                name: 'R' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 4,
+                name: 'R' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 5,
+                name: 'R' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_queen() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            .P......
+            ........
+            .Q..p...
+            ........
+        ";
+        // White
+        let piece = Piece {
+            row: 2,
+            col: 2,
+            name: 'Q' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 3,
+                col: 2,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 3,
+                col: 3,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 4,
+                col: 4,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 5,
+                col: 5,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 6,
+                col: 6,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 7,
+                col: 7,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 8,
+                col: 8,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 3,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 2,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 1,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 1,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 3,
+                col: 1,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 3,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 4,
+                name: 'Q' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 5,
+                name: 'Q' as u8,
+            },
+        ];
+        assert_moves_allowed_eq(board, piece, allowed);
+    }
+
+    #[test]
+    fn test_king() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            .P......
+            .Kp.....
+            ........
+        ";
+        // White
+        let piece = Piece {
+            row: 2,
+            col: 2,
+            name: 'K' as u8,
+        };
+        let allowed = vec![
+            Piece {
+                row: 3,
+                col: 3,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 3,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 3,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 2,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 1,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 1,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 3,
+                col: 1,
+                name: 'K' as u8,
             },
         ];
         assert_moves_allowed_eq(board, piece, allowed);
