@@ -44,7 +44,7 @@ impl<'a> Game<'a> {
                 .expect("Couldn't load pieces sprite sheet"),
             piece_placements: [[0; 8 + 1]; 8 + 1],
             rules: Rules::defaults(),
-            game_data: GameData { ply: 1 },
+            game_data: GameData { ply: 1, mask: 0 },
             input: InputState::NotDragging,
         };
         s.setup();
@@ -101,9 +101,26 @@ impl<'a> Game<'a> {
                                 col: sc as u8,
                                 name,
                             };
-                            if self.is_legal(source_piece, (r, c)) {
+                            if let Some(m) = self.get_legal(source_piece, (r, c)) {
                                 self.piece_placements[sr][sc] = 0;
                                 self.piece_placements[r][c] = name;
+                                match m.typ {
+                                    MoveType::Capture { row: cr, col: cc } => {
+                                        if (cr as usize, cc as usize) != (r, c) {
+                                            self.piece_placements[cr as usize][cc as usize] = 0;
+                                        }
+                                    }
+                                    MoveType::Secondary { src: ss, dst: sd } => {
+                                        if (ss.row as usize, ss.col as usize) != (r, c) {
+                                            self.piece_placements[ss.row as usize]
+                                                [ss.col as usize] = 0;
+                                        }
+                                        self.piece_placements[sd.row as usize][sd.col as usize] =
+                                            sd.name;
+                                    }
+                                    MoveType::Normal => {}
+                                }
+                                self.game_data = m.game_data;
                                 self.game_data.ply += 1;
                             }
                         }
@@ -114,16 +131,21 @@ impl<'a> Game<'a> {
         }
     }
 
-    fn is_legal(&self, piece: Piece, to: (usize, usize)) -> bool {
+    fn get_legal(&self, piece: Piece, to: (usize, usize)) -> Option<Move> {
         if !self.is_turn(piece) {
-            return false;
+            return None;
         }
-        let allowed = self.rules.allowed_moves(piece, &self.piece_placements);
-        allowed.contains(&Piece {
-            row: to.0 as u8,
-            col: to.1 as u8,
-            name: piece.name,
-        })
+        self.rules
+            .allowed_moves(piece, &self.piece_placements, self.game_data)
+            .into_iter()
+            .find(|m| {
+                m.dst
+                    == Piece {
+                        row: to.0 as u8,
+                        col: to.1 as u8,
+                        name: piece.name,
+                    }
+            })
     }
 
     fn is_turn(&self, piece: Piece) -> bool {
