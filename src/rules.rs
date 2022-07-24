@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, cmp::{min, max}};
+use std::{
+    cmp::{max, min},
+    collections::{HashMap, HashSet},
+};
 
 use crate::prelude::*;
 
@@ -150,20 +153,157 @@ fn add_linear_moves(
     }
 }
 
-fn add_castle(p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>, rook_col: usize) {
+fn add_knight_moves(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Move>, gd: GameData) {
+    let is_white = p.is_white();
+    for (x, y) in [
+        (1, 2),
+        (2, 1),
+        (2, -1),
+        (1, -2),
+        (-1, -2),
+        (-2, -1),
+        (-2, 1),
+        (-1, 2),
+    ] {
+        let nr = p.row as i32 + y;
+        let nc = p.col as i32 + x;
+        if !std_in_bounds(nr, nc) {
+            continue;
+        }
+        let (nr, nc) = (nr as usize, nc as usize);
+        if pp[nr][nc] != 0 {
+            if is_piece_white(pp[nr][nc]) != is_white {
+                hs.insert(Move::capture(nr, nc, p.name, gd));
+            }
+        } else {
+            hs.insert(Move::normal(nr, nc, p.name, gd));
+        }
+    }
+}
+
+fn add_pawn_captures(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Move>, gd: GameData) {
+    let dir: i8 = if p.is_white() { 1 } else { -1 };
+    for i in [-1, 1] {
+        let r = (p.row as i8 + dir) as usize;
+        let c = (p.col as i8 + i) as usize;
+        if 1 <= c && c <= 8 && pp[r][c] != 0 && is_piece_white(pp[r][c]) != p.is_white() {
+            hs.insert(Move::capture(r, c, p.name, gd));
+        }
+    }
+}
+
+fn piece_attacked(p: Piece, pp: &PiecePlacements, game_data: GameData) -> bool {
+    let gd = GameData {
+        mask: GD_NO_BLACK_KS_CASTLE
+            | GD_NO_BLACK_QS_CASTLE
+            | GD_NO_WHITE_KS_CASTLE
+            | GD_NO_WHITE_QS_CASTLE,
+        ..game_data
+    };
+    let white = p.is_white();
+    let mut hs = HashSet::<Move>::new();
+    let gen_rook_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
+        add_linear_moves(
+            Piece {
+                name: if white { 'R' } else { 'r' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            &AXES,
+            8,
+            gd,
+        );
+    });
+    let gen_bishop_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
+        add_linear_moves(
+            Piece {
+                name: if white { 'B' } else { 'b' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            &DIAGONALS,
+            8,
+            gd,
+        );
+    });
+    let gen_knight_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
+        add_knight_moves(
+            Piece {
+                name: if white { 'N' } else { 'n' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            gd,
+        );
+    });
+    let gen_pawn_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
+        add_pawn_captures(
+            Piece {
+                name: if white { 'P' } else { 'p' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            gd,
+        );
+    });
+    let moves_to_gen = [
+        (gen_rook_attacks, "RQ"),
+        (gen_bishop_attacks, "BQ"),
+        (gen_knight_attacks, "N"),
+        (gen_pawn_attacks, "P"),
+    ];
+    for (f, pieces) in moves_to_gen {
+        hs.clear();
+        f(&mut hs);
+        for m in hs.iter() {
+            if let MoveType::Capture { row, col } = m.typ {
+                let n = (pp[row as usize][col as usize] as char).to_ascii_uppercase();
+                for piece in pieces.chars() {
+                    if n == piece {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+fn add_castle(
+    p: Piece,
+    pp: &PiecePlacements,
+    gd: GameData,
+    hs: &mut HashSet<Move>,
+    rook_col: usize,
+) {
     let mask = if p.is_white() {
-        if rook_col == 1 { GD_NO_WHITE_QS_CASTLE } else { GD_NO_WHITE_KS_CASTLE }
+        if rook_col == 1 {
+            GD_NO_WHITE_QS_CASTLE
+        } else {
+            GD_NO_WHITE_KS_CASTLE
+        }
     } else {
-        if rook_col == 1 { GD_NO_BLACK_QS_CASTLE } else { GD_NO_BLACK_KS_CASTLE }
+        if rook_col == 1 {
+            GD_NO_BLACK_QS_CASTLE
+        } else {
+            GD_NO_BLACK_KS_CASTLE
+        }
     };
     if (gd.mask & mask) != 0 {
         return;
     }
     let (row, new_mask, rn) = if p.is_white() {
-        (1, GD_NO_WHITE_KS_CASTLE | GD_NO_WHITE_QS_CASTLE, 'R' as u8) } else {
-             (8, GD_NO_BLACK_KS_CASTLE | GD_NO_BLACK_QS_CASTLE, 'r' as u8) };
-    let ks = 5;  // King starting square
-    let (kd, rd) = if rook_col == 1 {  // King / rook destination squares
+        (1, GD_NO_WHITE_KS_CASTLE | GD_NO_WHITE_QS_CASTLE, 'R' as u8)
+    } else {
+        (8, GD_NO_BLACK_KS_CASTLE | GD_NO_BLACK_QS_CASTLE, 'r' as u8)
+    };
+    let ks = 5; // King starting square
+    let (kd, rd) = if rook_col == 1 {
+        // King / rook destination squares
         (3, 4)
     } else {
         (7, 6)
@@ -177,9 +317,32 @@ fn add_castle(p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Mov
         return;
     }
 
+    // Make sure the king isn't castling while in check.
+    if piece_attacked(
+        Piece {
+            row: row as u8,
+            col: ks as u8,
+            name: p.name,
+        },
+        pp,
+        gd,
+    ) {
+        return;
+    }
+
     // Make sure there's nothing between king and rook.
     for col in min(rook_col, ks) + 1..=max(rook_col, ks) - 1 {
-        if pp[row][col] != 0 {
+        if pp[row][col] != 0
+            || piece_attacked(
+                Piece {
+                    row: row as u8,
+                    col: col as u8,
+                    name: p.name,
+                },
+                pp,
+                gd,
+            )
+        {
             return;
         }
     }
@@ -192,7 +355,7 @@ fn add_castle(p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Mov
         },
         typ: MoveType::Secondary {
             src: Piece {
-                row:row as u8,
+                row: row as u8,
                 col: rook_col as u8,
                 name: rn,
             },
@@ -411,18 +574,7 @@ impl<'a> Rules<'a> {
                 piece_constrait: Some('p'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
-                        let dir: i8 = if p.is_white() { 1 } else { -1 };
-                        for i in [-1, 1] {
-                            let r = (p.row as i8 + dir) as usize;
-                            let c = (p.col as i8 + i) as usize;
-                            if 1 <= c
-                                && c <= 8
-                                && pp[r][c] != 0
-                                && is_piece_white(pp[r][c]) != p.is_white()
-                            {
-                                hs.insert(Move::capture(r, c, p.name, gd));
-                            }
-                        }
+                        add_pawn_captures(p, pp, hs, gd);
                     },
                 ),
             },
@@ -433,31 +585,7 @@ impl<'a> Rules<'a> {
                 piece_constrait: Some('n'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
-                        let is_white = p.is_white();
-                        for (x, y) in [
-                            (1, 2),
-                            (2, 1),
-                            (2, -1),
-                            (1, -2),
-                            (-1, -2),
-                            (-2, -1),
-                            (-2, 1),
-                            (-1, 2),
-                        ] {
-                            let nr = p.row as i32 + y;
-                            let nc = p.col as i32 + x;
-                            if !std_in_bounds(nr, nc) {
-                                continue;
-                            }
-                            let (nr, nc) = (nr as usize, nc as usize);
-                            if pp[nr][nc] != 0 {
-                                if is_piece_white(pp[nr][nc]) != is_white {
-                                    hs.insert(Move::capture(nr, nc, p.name, gd));
-                                }
-                            } else {
-                                hs.insert(Move::normal(nr, nc, p.name, gd));
-                            }
-                        }
+                        add_knight_moves(p, pp, hs, gd);
                     },
                 ),
             },
@@ -1261,17 +1389,24 @@ mod tests {
                 name: 'K' as u8,
             },
         ];
-        let gd = GameData { ply: 1, mask: GD_NO_WHITE_KS_CASTLE };
+        let gd = GameData {
+            ply: 1,
+            mask: GD_NO_WHITE_KS_CASTLE,
+        };
         assert_moves_allowed_eq_with_gd(board, piece, &allowed, gd);
 
-        allowed.push(Piece { row: 1, col: 7, name: 'K' as u8 });
+        allowed.push(Piece {
+            row: 1,
+            col: 7,
+            name: 'K' as u8,
+        });
         assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
     fn test_castles_queenside() {
         let board = "
-            r...kb..
+            r...kq..
             ...ppp..
             ........
             ........
@@ -1285,17 +1420,22 @@ mod tests {
             col: 5,
             name: 'k' as u8,
         };
-        let mut allowed = vec![
-            Piece {
-                row: 8,
-                col: 4,
-                name: 'k' as u8,
-            },
-        ];
-        let gd = GameData { ply: 1, mask: GD_NO_BLACK_QS_CASTLE };
+        let mut allowed = vec![Piece {
+            row: 8,
+            col: 4,
+            name: 'k' as u8,
+        }];
+        let gd = GameData {
+            ply: 1,
+            mask: GD_NO_BLACK_QS_CASTLE,
+        };
         assert_moves_allowed_eq_with_gd(board, piece, &allowed, gd);
 
-        allowed.push(Piece { row: 8, col: 3, name: 'k' as u8 });
+        allowed.push(Piece {
+            row: 8,
+            col: 3,
+            name: 'k' as u8,
+        });
         assert_moves_allowed_eq(board, piece, &allowed);
     }
 
@@ -1317,6 +1457,113 @@ mod tests {
             name: 'k' as u8,
         };
         assert_moves_allowed_eq(board, piece, &Vec::new());
+    }
+
+    #[test]
+    fn test_castles_through_check() {
+        let piece = Piece {
+            row: 1,
+            col: 5,
+            name: 'K' as u8,
+        };
+        let allowed = vec![  // Castles not allowed.
+            Piece {
+                row: 1,
+                col: 4,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 4,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 5,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 6,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 6,
+                name: 'K' as u8,
+            },
+        ];
+        let board = "
+            ......q.
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ......r.
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            q.......
+            ........
+            ........
+            ........
+            ........
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            b.......
+            ........
+            ........
+            ........
+            ........
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            .....n..
+            ........
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ....p...
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     fn assert_moves_allowed_eq_with_gd(
