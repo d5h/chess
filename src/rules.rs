@@ -55,11 +55,10 @@ pub struct Move {
 
 pub trait SetupRuleFn = Fn() -> Vec<Piece>;
 pub trait TurnRuleFn = Fn(Piece, GameData) -> bool;
-// FIXME: will also need game history for castling and en passant
 // FIXME: need to be able to remove a piece on a different square than where the piece moves
 //        for en passant
-// FIXME: need to have a rule for resolving checks
 pub trait MovementRuleFn = Fn(Piece, &PiecePlacements, GameData, &mut HashSet<Move>);
+pub trait ConstraintRuleFn = Fn(Piece, &PiecePlacements, GameData) -> bool;
 
 extern "C" {
     // JS plugins
@@ -80,6 +79,8 @@ pub struct Rules<'a> {
     pub turn_rules: HashMap<&'a str, Box<dyn TurnRuleFn>>,
     // Key: rule name. Value: a callable that returns allowed moves for a given piece.
     pub movement_rules: HashMap<&'a str, MovementRule>,
+    // Key: rule name. Value: a callable that (dis)allows a move (for, leaves king in check).
+    pub move_constraint_rules: HashMap<&'a str, Box<dyn ConstraintRuleFn>>,
 }
 
 impl Piece {
@@ -202,6 +203,7 @@ fn piece_attacked(p: Piece, pp: &PiecePlacements, game_data: GameData) -> bool {
     };
     let white = p.is_white();
     let mut hs = HashSet::<Move>::new();
+    // TODO: Turn these into fn so I don't need to box them.
     let gen_rook_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
         add_linear_moves(
             Piece {
@@ -250,11 +252,38 @@ fn piece_attacked(p: Piece, pp: &PiecePlacements, game_data: GameData) -> bool {
             gd,
         );
     });
+    // We could optimize king attacks by checking if the opponent king is within
+    // one square. But for simplicity will do this for now.
+    let gen_king_attacks: Box<dyn Fn(&mut HashSet<Move>)> = Box::new(|hs: &mut HashSet<Move>| {
+        add_linear_moves(
+            Piece {
+                name: if white { 'K' } else { 'k' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            &AXES,
+            1,
+            gd,
+        );
+        add_linear_moves(
+            Piece {
+                name: if white { 'K' } else { 'k' } as u8,
+                ..p
+            },
+            pp,
+            hs,
+            &DIAGONALS,
+            1,
+            gd,
+        );
+    });
     let moves_to_gen = [
         (gen_rook_attacks, "RQ"),
         (gen_bishop_attacks, "BQ"),
         (gen_knight_attacks, "N"),
         (gen_pawn_attacks, "P"),
+        (gen_king_attacks, "K"),
     ];
     for (f, pieces) in moves_to_gen {
         hs.clear();
@@ -372,6 +401,19 @@ fn add_castle(
     });
 }
 
+fn find_piece(name: char, pp: &PiecePlacements) -> Option<(u8, u8)> {
+    let name = name as u8;
+    for r in 0..8 {
+        // TODO: get board size from rules
+        for c in 0..8 {
+            if pp[r][c] == name {
+                return Some((r as u8, c as u8));
+            }
+        }
+    }
+    None
+}
+
 impl<'a> Rules<'a> {
     pub fn defaults() -> Self {
         Self {
@@ -379,6 +421,7 @@ impl<'a> Rules<'a> {
             setup_rules: Self::default_setup_rules(),
             turn_rules: Self::default_turn_rules(),
             movement_rules: Self::default_movement_rules(),
+            move_constraint_rules: Self::default_move_constraint_rules(),
         }
     }
 
@@ -704,6 +747,47 @@ impl<'a> Rules<'a> {
         hm
     }
 
+    fn default_move_constraint_rules() -> HashMap<&'a str, Box<dyn ConstraintRuleFn>> {
+        let mut hm = HashMap::<&'a str, Box<dyn ConstraintRuleFn>>::new();
+        hm.insert(
+            "resolve-check",
+            Box::new(|p: Piece, pp: &PiecePlacements, gd: GameData| {
+                let king = if p.is_white() { 'K' } else { 'k' };
+                if let Some((r, c)) = find_piece(king, pp) {
+                    let kp = Piece {
+                        row: r,
+                        col: c,
+                        name: king as u8,
+                    };
+                    return !piece_attacked(kp, pp, gd);
+                }
+                true
+            }),
+        );
+        hm
+    }
+
+    pub fn make_move(piece: Piece, m: Move, piece_placements: &mut PiecePlacements) {
+        let (sr, sc) = (piece.row as usize, piece.col as usize);
+        let (r, c) = (m.dst.row as usize, m.dst.col as usize);
+        piece_placements[sr][sc] = 0;
+        piece_placements[r][c] = piece.name;
+        match m.typ {
+            MoveType::Capture { row: cr, col: cc } => {
+                if (cr as usize, cc as usize) != (r, c) {
+                    piece_placements[cr as usize][cc as usize] = 0;
+                }
+            }
+            MoveType::Secondary { src: ss, dst: sd } => {
+                if (ss.row as usize, ss.col as usize) != (r, c) {
+                    piece_placements[ss.row as usize][ss.col as usize] = 0;
+                }
+                piece_placements[sd.row as usize][sd.col as usize] = sd.name;
+            }
+            MoveType::Normal => {}
+        }
+    }
+
     pub fn allowed_moves(
         &self,
         piece: Piece,
@@ -717,7 +801,44 @@ impl<'a> Rules<'a> {
             }
             (r.f)(piece, piece_placements, gd, &mut allowed);
         }
-        allowed
+        self.constrain_moves(&allowed, piece, piece_placements, gd)
+    }
+
+    fn constrain_moves(
+        &self,
+        hs: &HashSet<Move>,
+        p: Piece,
+        pp: &PiecePlacements,
+        gd: GameData,
+    ) -> HashSet<Move> {
+        let mut post_pp = pp.clone();
+        let (sr, sc) = (p.row as usize, p.col as usize);
+        hs.iter()
+            .filter(|&&m| {
+                let mut allow = true;
+                let (dr, dc) = (m.dst.row as usize, m.dst.col as usize);
+                let mut cr = dr;
+                let mut cc = dc;
+                if let MoveType::Capture { row, col } = m.typ {
+                    cr = row as usize;
+                    cc = col as usize;
+                }
+                // Make the move
+                Rules::make_move(p, m, &mut post_pp);
+                for (_, r) in self.move_constraint_rules.iter() {
+                    if !r(p, &post_pp, gd) {
+                        allow = false;
+                        break;
+                    }
+                }
+                // Reset the board
+                post_pp[sr][sc] = pp[sr][sc];
+                post_pp[dr][dc] = pp[dr][dc];
+                post_pp[cr][cc] = pp[cr][cc];
+                allow
+            })
+            .copied()
+            .collect()
     }
 }
 
@@ -1322,11 +1443,6 @@ mod tests {
             },
             Piece {
                 row: 1,
-                col: 2,
-                name: 'K' as u8,
-            },
-            Piece {
-                row: 1,
                 col: 1,
                 name: 'K' as u8,
             },
@@ -1466,7 +1582,8 @@ mod tests {
             col: 5,
             name: 'K' as u8,
         };
-        let allowed = vec![  // Castles not allowed.
+        let allowed = vec![
+            // Castles not allowed.
             Piece {
                 row: 1,
                 col: 4,
@@ -1520,24 +1637,12 @@ mod tests {
         let board = "
             ........
             ........
+            ........
+            ........
+            ........
             q.......
             ........
-            ........
-            ........
-            ........
-            ....K..R
-        ";
-        assert_moves_allowed_eq(board, piece, &allowed);
-
-        let board = "
-            ........
-            ........
-            b.......
-            ........
-            ........
-            ........
-            ........
-            ....K..R
+            R...K...
         ";
         assert_moves_allowed_eq(board, piece, &allowed);
 
@@ -1547,8 +1652,8 @@ mod tests {
             ........
             ........
             ........
-            .....n..
             ........
+            .......b
             ....K..R
         ";
         assert_moves_allowed_eq(board, piece, &allowed);
@@ -1560,7 +1665,31 @@ mod tests {
             ........
             ........
             ........
-            ....p...
+            n.......
+            R...K...
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            .......p
+            ....K..R
+        ";
+        assert_moves_allowed_eq(board, piece, &allowed);
+
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            .......k
             ....K..R
         ";
         assert_moves_allowed_eq(board, piece, &allowed);
