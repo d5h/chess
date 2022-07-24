@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, cmp::{min, max}};
 
 use crate::prelude::*;
 
@@ -148,6 +148,65 @@ fn add_linear_moves(
             hs.insert(Move::normal(nr, nc, p.name, game_data));
         }
     }
+}
+
+fn add_castle(p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>, rook_col: usize) {
+    let mask = if p.is_white() {
+        if rook_col == 1 { GD_NO_WHITE_QS_CASTLE } else { GD_NO_WHITE_KS_CASTLE }
+    } else {
+        if rook_col == 1 { GD_NO_BLACK_QS_CASTLE } else { GD_NO_BLACK_KS_CASTLE }
+    };
+    if (gd.mask & mask) != 0 {
+        return;
+    }
+    let (row, new_mask, rn) = if p.is_white() {
+        (1, GD_NO_WHITE_KS_CASTLE | GD_NO_WHITE_QS_CASTLE, 'R' as u8) } else {
+             (8, GD_NO_BLACK_KS_CASTLE | GD_NO_BLACK_QS_CASTLE, 'r' as u8) };
+    let ks = 5;  // King starting square
+    let (kd, rd) = if rook_col == 1 {  // King / rook destination squares
+        (3, 4)
+    } else {
+        (7, 6)
+    };
+
+    // We don't really need to check the king starting location, since if the
+    // king has moved, no-castle flags would be set. But adding this check
+    // makes the tests more intuitive to write because we don't have to set
+    // no-castle flags on every test that involves the king.
+    if pp[row][ks] != p.name || pp[row][rook_col] != rn {
+        return;
+    }
+
+    // Make sure there's nothing between king and rook.
+    for col in min(rook_col, ks) + 1..=max(rook_col, ks) - 1 {
+        if pp[row][col] != 0 {
+            return;
+        }
+    }
+    // FIXME: Make sure the king isn't in check, or castling through check.
+    hs.insert(Move {
+        dst: Piece {
+            row: row as u8,
+            col: kd,
+            name: p.name,
+        },
+        typ: MoveType::Secondary {
+            src: Piece {
+                row:row as u8,
+                col: rook_col as u8,
+                name: rn,
+            },
+            dst: Piece {
+                row: row as u8,
+                col: rd,
+                name: rn,
+            },
+        },
+        game_data: GameData {
+            mask: gd.mask | new_mask,
+            ..gd
+        },
+    });
 }
 
 impl<'a> Rules<'a> {
@@ -485,66 +544,18 @@ impl<'a> Rules<'a> {
                 piece_constrait: Some('k'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
-                        if p.is_white() {
-                            if (gd.mask & GD_NO_WHITE_KS_CASTLE) != 0 {
-                                return;
-                            }
-                        } else {
-                            if (gd.mask & GD_NO_BLACK_KS_CASTLE) != 0 {
-                                return;
-                            }
-                        }
-                        let (ks, kd, rn, rs, rd, mask) = if p.is_white() {
-                            (
-                                (1, 5),
-                                (1, 7),
-                                'R' as u8,
-                                (1, 8),
-                                (1, 6),
-                                GD_NO_WHITE_KS_CASTLE | GD_NO_WHITE_QS_CASTLE,
-                            )
-                        } else {
-                            (
-                                (8, 5),
-                                (8, 7),
-                                'r' as u8,
-                                (8, 8),
-                                (8, 6),
-                                GD_NO_BLACK_KS_CASTLE | GD_NO_BLACK_QS_CASTLE,
-                            )
-                        };
-                        // Make sure there's nothing between king and rook.
-                        // FIXME: Make sure the king isn't in check, or castling through check.
-                        // We don't really need to check the king starting location, since if the
-                        // king has moved, no-castle flags would be set. But adding this check
-                        // makes the tests more intuitive to write because we don't have to set
-                        // no-castle flags on every test that involves the king.
-                        if pp[ks.0][ks.1] != p.name || pp[kd.0][kd.1] != 0 || pp[rd.0][rd.1] != 0 {
-                            return;
-                        }
-                        hs.insert(Move {
-                            dst: Piece {
-                                row: kd.0 as u8,
-                                col: kd.1 as u8,
-                                name: p.name,
-                            },
-                            typ: MoveType::Secondary {
-                                src: Piece {
-                                    row: rs.0 as u8,
-                                    col: rs.1 as u8,
-                                    name: rn,
-                                },
-                                dst: Piece {
-                                    row: rd.0 as u8,
-                                    col: rd.1 as u8,
-                                    name: rn,
-                                },
-                            },
-                            game_data: GameData {
-                                mask: gd.mask | mask,
-                                ..gd
-                            },
-                        });
+                        add_castle(p, pp, gd, hs, 8);
+                    },
+                ),
+            },
+        );
+        hm.insert(
+            "queenside-castle",
+            MovementRule {
+                piece_constrait: Some('k'),
+                f: Box::new(
+                    |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
+                        add_castle(p, pp, gd, hs, 1);
                     },
                 ),
             },
@@ -653,7 +664,7 @@ mod tests {
                     name: 'P' as u8,
                 },
             ];
-            assert_moves_allowed_eq(board, piece, allowed);
+            assert_moves_allowed_eq(board, piece, &allowed);
         }
         // Test black pieces, each column
         for col in 1..=8 {
@@ -674,7 +685,7 @@ mod tests {
                     name: 'p' as u8,
                 },
             ];
-            assert_moves_allowed_eq(board, piece, allowed);
+            assert_moves_allowed_eq(board, piece, &allowed);
         }
     }
 
@@ -701,7 +712,7 @@ mod tests {
             col: 1,
             name: 'P' as u8,
         }];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
         // Black
         let piece = Piece {
             row: 6,
@@ -713,7 +724,7 @@ mod tests {
             col: 8,
             name: 'p' as u8,
         }];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -734,14 +745,14 @@ mod tests {
             col: 1,
             name: 'P' as u8,
         };
-        assert_moves_allowed_eq(board, piece, Vec::new());
+        assert_moves_allowed_eq(board, piece, &Vec::new());
         // Black
         let piece = Piece {
             row: 5,
             col: 1,
             name: 'p' as u8,
         };
-        assert_moves_allowed_eq(board, piece, Vec::new());
+        assert_moves_allowed_eq(board, piece, &Vec::new());
     }
 
     #[test]
@@ -767,7 +778,7 @@ mod tests {
             col: 4,
             name: 'P' as u8,
         }];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
         // Black
         let piece = Piece {
             row: 5,
@@ -786,7 +797,7 @@ mod tests {
                 name: 'p' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -815,7 +826,7 @@ mod tests {
                 name: 'B' as u8,
             })
         }
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
         // Black
         let piece = Piece {
             row: 1,
@@ -859,7 +870,7 @@ mod tests {
                 name: 'b' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -885,7 +896,7 @@ mod tests {
             col: 3,
             name: 'B' as u8,
         }];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -948,7 +959,7 @@ mod tests {
                 name: 'N' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
         // Black
         let piece = Piece {
             row: 1,
@@ -967,7 +978,7 @@ mod tests {
                 name: 'n' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -993,7 +1004,7 @@ mod tests {
             col: 3,
             name: 'N' as u8,
         }];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -1046,7 +1057,7 @@ mod tests {
                 name: 'R' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -1144,7 +1155,7 @@ mod tests {
                 name: 'Q' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
     }
 
     #[test]
@@ -1202,16 +1213,119 @@ mod tests {
                 name: 'K' as u8,
             },
         ];
-        assert_moves_allowed_eq(board, piece, allowed);
+        assert_moves_allowed_eq(board, piece, &allowed);
+    }
+
+    #[test]
+    fn test_castles_kingside() {
+        let board = "
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+            ....K..R
+        ";
+        // White
+        let piece = Piece {
+            row: 1,
+            col: 5,
+            name: 'K' as u8,
+        };
+        let mut allowed = vec![
+            Piece {
+                row: 1,
+                col: 4,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 4,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 5,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 2,
+                col: 6,
+                name: 'K' as u8,
+            },
+            Piece {
+                row: 1,
+                col: 6,
+                name: 'K' as u8,
+            },
+        ];
+        let gd = GameData { ply: 1, mask: GD_NO_WHITE_KS_CASTLE };
+        assert_moves_allowed_eq_with_gd(board, piece, &allowed, gd);
+
+        allowed.push(Piece { row: 1, col: 7, name: 'K' as u8 });
+        assert_moves_allowed_eq(board, piece, &allowed);
+    }
+
+    #[test]
+    fn test_castles_queenside() {
+        let board = "
+            r...kb..
+            ...ppp..
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+        ";
+        let piece = Piece {
+            row: 8,
+            col: 5,
+            name: 'k' as u8,
+        };
+        let mut allowed = vec![
+            Piece {
+                row: 8,
+                col: 4,
+                name: 'k' as u8,
+            },
+        ];
+        let gd = GameData { ply: 1, mask: GD_NO_BLACK_QS_CASTLE };
+        assert_moves_allowed_eq_with_gd(board, piece, &allowed, gd);
+
+        allowed.push(Piece { row: 8, col: 3, name: 'k' as u8 });
+        assert_moves_allowed_eq(board, piece, &allowed);
+    }
+
+    #[test]
+    fn test_castles_through_piece() {
+        let board = "
+            r..qkb..
+            ...ppp..
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+        ";
+        let piece = Piece {
+            row: 8,
+            col: 5,
+            name: 'k' as u8,
+        };
+        assert_moves_allowed_eq(board, piece, &Vec::new());
     }
 
     fn assert_moves_allowed_eq_with_gd(
         board: &str,
         piece: Piece,
-        expect_allowed: Vec<Piece>,
+        expect_allowed: &Vec<Piece>,
         gd: GameData,
     ) {
-        let expect_allowed: HashSet<Piece> = expect_allowed.into_iter().collect();
+        let expect_allowed: HashSet<Piece> = expect_allowed.iter().map(|&p| p).collect();
         let rules = Rules::defaults();
         let placements = string_board_to_placements(board);
         let allowed: HashSet<Piece> = rules
@@ -1222,7 +1336,7 @@ mod tests {
         assert_eq!(allowed, expect_allowed);
     }
 
-    fn assert_moves_allowed_eq(board: &str, piece: Piece, expect_allowed: Vec<Piece>) {
+    fn assert_moves_allowed_eq(board: &str, piece: Piece, expect_allowed: &Vec<Piece>) {
         assert_moves_allowed_eq_with_gd(board, piece, expect_allowed, GameData { ply: 1, mask: 0 });
     }
 
