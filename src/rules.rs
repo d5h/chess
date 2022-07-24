@@ -817,12 +817,6 @@ impl<'a> Rules<'a> {
             .filter(|&&m| {
                 let mut allow = true;
                 let (dr, dc) = (m.dst.row as usize, m.dst.col as usize);
-                let mut cr = dr;
-                let mut cc = dc;
-                if let MoveType::Capture { row, col } = m.typ {
-                    cr = row as usize;
-                    cc = col as usize;
-                }
                 // Make the move
                 Rules::make_move(p, m, &mut post_pp);
                 for (_, r) in self.move_constraint_rules.iter() {
@@ -834,7 +828,15 @@ impl<'a> Rules<'a> {
                 // Reset the board
                 post_pp[sr][sc] = pp[sr][sc];
                 post_pp[dr][dc] = pp[dr][dc];
-                post_pp[cr][cc] = pp[cr][cc];
+                if let MoveType::Capture { row, col } = m.typ {
+                    let (cr, cc) = (row as usize, col as usize);
+                    post_pp[cr][cc] = pp[cr][cc];
+                } else if let MoveType::Secondary { src, dst } = m.typ {
+                    let (ssr, ssc) = (src.row as usize, src.col as usize);
+                    let (sdr, sdc) = (dst.row as usize, dst.col as usize);
+                    post_pp[ssr][ssc] = pp[ssr][ssc];
+                    post_pp[sdr][sdc] = pp[sdr][sdc];
+                }
                 allow
             })
             .copied()
