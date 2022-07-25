@@ -182,13 +182,26 @@ fn add_knight_moves(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Move>, gd: 
     }
 }
 
+fn add_pawn_move(p: Piece, r: usize, c: usize, gd: GameData, hs: &mut HashSet<Move>, is_cap: bool) {
+    let white = p.is_white();
+    let move_ctor = if is_cap { Move::capture } else { Move::normal };
+    if 2 <= r && r <= 7 {
+        hs.insert(move_ctor(r, c, p.name, gd));
+    } else if white && r == 8 {
+        // Promote to Q only for now
+        hs.insert(move_ctor(r, c, 'Q' as u8, gd));
+    } else if !white && r == 1 {
+        hs.insert(move_ctor(r, c, 'q' as u8, gd));
+    }
+}
+
 fn add_pawn_captures(p: Piece, pp: &PiecePlacements, hs: &mut HashSet<Move>, gd: GameData) {
     let dir: i8 = if p.is_white() { 1 } else { -1 };
     for i in [-1, 1] {
         let r = (p.row as i8 + dir) as usize;
         let c = (p.col as i8 + i) as usize;
         if 1 <= c && c <= 8 && pp[r][c] != 0 && is_piece_white(pp[r][c]) != p.is_white() {
-            hs.insert(Move::capture(r, c, p.name, gd));
+            add_pawn_move(p, r, c, gd, hs, true);
         }
     }
 }
@@ -403,9 +416,9 @@ fn add_castle(
 
 fn find_piece(name: char, pp: &PiecePlacements) -> Option<(u8, u8)> {
     let name = name as u8;
-    for r in 0..8 {
+    for r in 1..=8 {
         // TODO: get board size from rules
-        for c in 0..8 {
+        for c in 1..=8 {
             if pp[r][c] == name {
                 return Some((r as u8, c as u8));
             }
@@ -602,10 +615,11 @@ impl<'a> Rules<'a> {
                             1
                         };
                         for i in 1..=max {
-                            let rc = ((p.row as i32 + dir * i) as usize, p.col as usize);
-                            if rc.0 <= 8 && pp[rc.0][rc.1] == 0 {
-                                hs.insert(Move::normal(rc.0, rc.1, p.name, gd));
+                            let (r, c) = ((p.row as i32 + dir * i) as usize, p.col as usize);
+                            if pp[r][c] != 0 {
+                                return;
                             }
+                            add_pawn_move(p, r, c, gd, hs, false);
                         }
                     },
                 ),
@@ -771,7 +785,7 @@ impl<'a> Rules<'a> {
         let (sr, sc) = (piece.row as usize, piece.col as usize);
         let (r, c) = (m.dst.row as usize, m.dst.col as usize);
         piece_placements[sr][sc] = 0;
-        piece_placements[r][c] = piece.name;
+        piece_placements[r][c] = m.dst.name;
         match m.typ {
             MoveType::Capture { row: cr, col: cc } => {
                 if (cr as usize, cc as usize) != (r, c) {
@@ -1695,6 +1709,26 @@ mod tests {
             ....K..R
         ";
         assert_moves_allowed_eq(board, piece, &allowed);
+    }
+
+    #[test]
+    fn test_resolves_check() {
+        let board = "
+            ...qkb..
+            ..Nppp..
+            ........
+            ........
+            ........
+            ........
+            ........
+            ........
+        ";
+        let piece = Piece {
+            row: 7,
+            col: 6,
+            name: 'p' as u8,
+        };
+        assert_moves_allowed_eq(board, piece, &Vec::new());
     }
 
     fn assert_moves_allowed_eq_with_gd(

@@ -121,14 +121,7 @@ impl<'a> Game<'a> {
         self.rules
             .allowed_moves(piece, &self.piece_placements, self.game_data)
             .into_iter()
-            .find(|m| {
-                m.dst
-                    == Piece {
-                        row: to.0 as u8,
-                        col: to.1 as u8,
-                        name: piece.name,
-                    }
-            })
+            .find(|m| m.dst.row == to.0 as u8 && m.dst.col == to.1 as u8)
     }
 
     fn is_turn(&self, piece: Piece) -> bool {
