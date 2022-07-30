@@ -23,7 +23,8 @@ Once inside the container, you can build and run the project like this:
 # Build the project
 cargo build --target wasm32-unknown-unknown --release
 
-# Run the project
-cp $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess.wasm . \
+# Run the UI
+cd ui
+cp $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess-ui.wasm . \
     && basic-http-server -a 0.0.0.0:4000
 ```
