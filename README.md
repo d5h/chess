@@ -13,6 +13,7 @@ docker run \
     --mount type=volume,src=chess-cargo-home,dst=/cargo/home \
     --mount type=volume,src=chess-cargo-target,dst=/cargo/target \
     -p 4000:4000 \
+    -p 4001:4001 \
     -it \
     chess
 ```
@@ -21,10 +22,16 @@ Once inside the container, you can build and run the project like this:
 
 ```bash
 # Build the project
-cargo build --target wasm32-unknown-unknown --release
+cargo build --release
 
 # Run the UI
-cd ui
-cp $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess-ui.wasm . \
-    && basic-http-server -a 0.0.0.0:4000
+cp $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess-ui.wasm ui \
+    && basic-http-server -a 0.0.0.0:4000 ui
+
+# Run the server
 ```
+
+If you're using VS Code, install the
+[remote container extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+and attach to the running container (the button is in the bottom left corner). Also
+install the [rust analyzer extension](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
