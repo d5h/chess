@@ -12,8 +12,7 @@ docker run \
     --mount "type=bind,src=$(pwd),dst=/src/chess" \
     --mount type=volume,src=chess-cargo-home,dst=/cargo/home \
     --mount type=volume,src=chess-cargo-target,dst=/cargo/target \
-    -p 4000:4000 \
-    -p 4001:4001 \
+    -p 58597:58597 \
     -it \
     chess
 ```
@@ -21,15 +20,11 @@ docker run \
 Once inside the container, you can build and run the project like this:
 
 ```bash
-# Build the project
-cargo build --release
-
-# Run the UI
-cp $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess-ui.wasm ui \
-    && basic-http-server -a 0.0.0.0:4000 ui
-
-# Run the server
+cargo build --release  # Only needed if changing ui/ rust code
+cargo run --release --bin server
 ```
+
+Then visit the ui at http://localhost:58597/ui/index.html.
 
 If you're using VS Code, install the
 [remote container extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)

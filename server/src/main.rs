@@ -43,9 +43,11 @@ async fn main() {
         },
     );
 
-    let routes = create.or(join);
+    let ui = warp::path("ui").and(warp::fs::dir("/srv/chess"));
+
+    let routes = ui.or(create).or(join);
     warp::serve(routes.with(warp::log("server")))
-        .run(([0, 0, 0, 0], 4001))
+        .run(([0, 0, 0, 0], 58597))
         .await;
 }
 
