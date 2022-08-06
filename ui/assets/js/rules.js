@@ -36,7 +36,7 @@ export function register_movement_rule(func) {
     rules.movement_rule = func;
 }
 
-export function init() {
+export function init_rules() {
     register_plugin = function (importObject) {
         importObject.env.movement_plugin = (piece_ptr, placements_ptr, retval_ptr, retval_len) => {
             let rule = new MovementRule(piece_ptr, placements_ptr, retval_ptr, retval_len);

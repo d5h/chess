@@ -54,7 +54,7 @@ pub struct Move {
 }
 
 pub trait SetupRuleFn = Fn() -> Vec<Piece>;
-pub trait TurnRuleFn = Fn(Piece, GameData) -> bool;
+pub trait TurnRuleFn = Fn(usize, Piece, GameData) -> bool;
 // FIXME: need to be able to remove a piece on a different square than where the piece moves
 //        for en passant
 pub trait MovementRuleFn = Fn(Piece, &PiecePlacements, GameData, &mut HashSet<Move>);
@@ -595,7 +595,9 @@ impl<'a> Rules<'a> {
         let mut hm = HashMap::<&'a str, Box<dyn TurnRuleFn>>::new();
         hm.insert(
             "player-order",
-            Box::new(|p: Piece, gd: GameData| p.is_white() == (gd.ply % 2 == 1)),
+            Box::new(|player: usize, p: Piece, gd: GameData| {
+                p.is_white() == (gd.ply % 2 == 1) && p.is_white() == (player == 0)
+            }),
         );
         hm
     }

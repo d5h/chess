@@ -21,7 +21,7 @@ Once inside the container, you can build and run the project like this:
 
 ```bash
 cargo build --release  # Only needed if changing ui/ rust code
-cargo run --release --bin server
+RUST_LOG=debug cargo run --release --bin server
 ```
 
 Then visit the ui at http://localhost:58597/ui/index.html.

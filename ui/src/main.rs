@@ -1,7 +1,6 @@
 #![feature(trait_alias)]
-#![feature(let_chains)]
 
-use std::panic;
+use std::{panic, sync::Mutex};
 
 use macroquad::prelude::*;
 
@@ -14,6 +13,49 @@ mod prelude {
 }
 
 use prelude::*;
+
+extern "C" {
+    // JS callbacks
+    fn on_move(piece_ptr: u32, placements_ptr: u32, retval_ptr: u32, retval_len: u32);
+    fn get_player_color() -> usize;
+}
+
+#[derive(Clone, Copy, Debug)]
+struct JsMove {
+    pub src_row: usize,
+    pub src_col: usize,
+    pub dst_row: usize,
+    pub dst_col: usize,
+}
+// We shouldn't really need a mutex since JS is single-threaded, but it provides
+// a warm fuzzy feeling.
+static JS_MOVE: Mutex<Option<JsMove>> = Mutex::new(None);
+
+// So JS can tell WASM to make a move
+#[no_mangle]
+pub extern "C" fn make_move_from_js(
+    src_row: usize,
+    src_col: usize,
+    dst_row: usize,
+    dst_col: usize,
+) {
+    log!("Got a move from JS!");
+    let mut m = JS_MOVE.lock().unwrap();
+    *m = Some(JsMove {
+        src_row,
+        src_col,
+        dst_row,
+        dst_col,
+    })
+}
+
+static FLIPPED: Mutex<bool> = Mutex::new(false);
+
+#[no_mangle]
+pub extern "C" fn flip_board(flipped: u32) {
+    let mut f = FLIPPED.lock().unwrap();
+    *f = flipped != 0;
+}
 
 // Mouse stuff
 #[derive(Clone, Copy, Debug)]
@@ -34,6 +76,8 @@ struct Game<'a> {
     rules: Rules<'a>,
     game_data: GameData,
     input: InputState,
+    flipped: bool,
+    player: usize, // 0 for white, 1 for black
 }
 
 impl<'a> Game<'a> {
@@ -46,6 +90,8 @@ impl<'a> Game<'a> {
             rules: Rules::defaults(),
             game_data: GameData { ply: 1, mask: 0 },
             input: InputState::NotDragging,
+            flipped: false,
+            player: 0,
         };
         s.setup();
         s
@@ -65,6 +111,12 @@ impl<'a> Game<'a> {
         }
     }
 
+    pub fn handle_js_changes(&mut self) {
+        let f = FLIPPED.lock().unwrap();
+        self.flipped = *f;
+        self.player = unsafe { get_player_color() };
+    }
+
     pub fn draw(&self) {
         self.draw_board();
         self.draw_pieces();
@@ -72,8 +124,7 @@ impl<'a> Game<'a> {
 
     pub fn handle_input(&mut self) {
         let pos = mouse_position();
-        let r = 8 - (pos.1 as usize / SQUARE_SIZE as usize); // TODO: get from rules
-        let c = 1 + pos.0 as usize / SQUARE_SIZE as usize;
+        let (r, c) = self.xy_to_rc(pos.0, pos.1);
         match self.input {
             InputState::NotDragging => {
                 if is_mouse_button_pressed(MouseButton::Left) {
@@ -90,32 +141,47 @@ impl<'a> Game<'a> {
             InputState::Dragging(drag) => {
                 if is_mouse_button_released(MouseButton::Left) {
                     log!("Released ({}, {})", r, c);
-                    // TODO: we might not need to check bounds, because macroquad doesn't seem to
-                    // track the mouse outside of the canvas. Get bounds from rules anyway.
-                    if 1 <= r && r <= 8 && 1 <= c && c <= 8 {
-                        let (sr, sc) = drag.source_rc;
-                        let name = self.piece_placements[sr][sc];
-                        if name != 0 {
-                            let source_piece = Piece {
-                                row: sr as u8,
-                                col: sc as u8,
-                                name,
-                            };
-                            if let Some(m) = self.get_legal(source_piece, (r, c)) {
-                                Rules::make_move(source_piece, m, &mut self.piece_placements);
-                                self.game_data = m.game_data;
-                                self.game_data.ply += 1;
-                            }
-                        }
-                    }
+                    let (sr, sc) = drag.source_rc;
+                    self.try_move(self.player, sr, sc, r, c);
                     self.input = InputState::NotDragging;
                 }
             }
         }
     }
 
-    fn get_legal(&self, piece: Piece, to: (usize, usize)) -> Option<Move> {
-        if !self.is_turn(piece) {
+    pub fn handle_js_move(&mut self) {
+        let mut m = JS_MOVE.lock().unwrap();
+        if let Some(m) = *m {
+            log!("Got a JsMove! {:?}", m);
+            self.try_move(1 - self.player, m.src_row, m.src_col, m.dst_row, m.dst_col);
+        }
+        *m = None;
+    }
+
+    fn try_move(&mut self, player: usize, sr: usize, sc: usize, dr: usize, dc: usize) {
+        if 1 <= dr && dr <= 8 && 1 <= dc && dc <= 8 {
+            let name = self.piece_placements[sr][sc];
+            if name != 0 {
+                let source_piece = Piece {
+                    row: sr as u8,
+                    col: sc as u8,
+                    name,
+                };
+                if let Some(m) = self.get_legal(player, source_piece, (dr, dc)) {
+                    Rules::make_move(source_piece, m, &mut self.piece_placements);
+                    self.game_data = m.game_data;
+                    self.game_data.ply += 1;
+                    unsafe {
+                        on_move(sr as u32, sc as u32, m.dst.row as u32, m.dst.col as u32);
+                    }
+                }
+            }
+        }
+        self.input = InputState::NotDragging;
+    }
+
+    fn get_legal(&self, player: usize, piece: Piece, to: (usize, usize)) -> Option<Move> {
+        if !self.is_turn(player, piece) {
             return None;
         }
         self.rules
@@ -124,9 +190,9 @@ impl<'a> Game<'a> {
             .find(|m| m.dst.row == to.0 as u8 && m.dst.col == to.1 as u8)
     }
 
-    fn is_turn(&self, piece: Piece) -> bool {
+    fn is_turn(&self, player: usize, piece: Piece) -> bool {
         for (_, r) in self.rules.turn_rules.iter() {
-            if r(piece, self.game_data) {
+            if r(player, piece, self.game_data) {
                 return true;
             }
         }
@@ -185,9 +251,19 @@ impl<'a> Game<'a> {
     }
 
     fn rc_to_xy(&self, r: usize, c: usize) -> (f32, f32) {
-        let y = (8 - r) as f32 * SQUARE_SIZE; // TODO: get board size from rules
-        let x = (c - 1) as f32 * SQUARE_SIZE;
+        // TODO: get board size from rules
+        let y = if self.flipped { r - 1 } else { 8 - r } as f32 * SQUARE_SIZE;
+        let x = if self.flipped { 8 - c } else { c - 1 } as f32 * SQUARE_SIZE;
         (x, y)
+    }
+
+    fn xy_to_rc(&self, x: f32, y: f32) -> (usize, usize) {
+        let x = x as usize / SQUARE_SIZE as usize;
+        let y = y as usize / SQUARE_SIZE as usize;
+        // TODO: get board size from rules
+        let r = if self.flipped { y + 1 } else { 8 - y };
+        let c = if self.flipped { 8 - x } else { 1 + x };
+        (r, c)
     }
 }
 
@@ -200,8 +276,10 @@ async fn main() {
     panic::set_hook(Box::new(hook));
     let mut game = Game::new().await;
     loop {
+        game.handle_js_changes();
         game.draw();
         game.handle_input();
+        game.handle_js_move();
         next_frame().await
     }
 }

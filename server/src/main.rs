@@ -73,6 +73,13 @@ async fn join_game(ws: WebSocket, game_id: Uuid, games: Games) {
                 if let Err(_) = tx.send(Message::text(game_info)) {
                     // This should get handled below by player_disconnected.
                 }
+            } else {
+                let msg = format!(r#"{{"joined": "{}"}}"#, player_id);
+                for (&pid, tx) in game.iter() {
+                    if pid != player_id {
+                        if let Err(_disconnected) = tx.send(Message::text(msg.clone())) {}
+                    }
+                }
             }
             game.insert(player_id, tx);
         } else {
@@ -147,14 +154,12 @@ async fn player_disconnected(game_id: Uuid, player_id: Uuid, games: &Games) {
             if game.is_empty() {
                 eprintln!("all players left game: {}", game_id);
                 w.remove(&game_id);
+            } else {
+                let msg = format!(r#"{{"disconnected": "{}"}}"#, player_id);
+                for (_, tx) in game.iter() {
+                    if let Err(_disconnected) = tx.send(Message::text(msg.clone())) {}
+                }
             }
         }
     }
 }
-
-// JS client:
-// let ws = new WebSocket("ws://localhost:4001/echo");
-// ws.onmessage = function (event) {
-//   console.log(event.data);
-// };
-// ws.send("hello");

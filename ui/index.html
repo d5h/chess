@@ -17,6 +17,9 @@
             color: white;
             z-index: 0;
         }
+        a {
+            color: lime;
+        }
     </style>
 </head>
 
@@ -25,9 +28,11 @@
     <!-- Minified and statically hosted version of https://github.com/not-fl3/macroquad/blob/master/js/mq_js_bundle.js -->
     <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
     <script type="module">
-        import { init, register_movement_rule } from "./assets/js/rules.js";
-        init();
+        import { init_rules, register_movement_rule } from "./assets/js/rules.js";
+        import { init_multiplayer, Multiplayer } from "./assets/js/multiplayer.js";
 
+        // Demo new movement rule
+        init_rules();
         function movement_rule(rule) {
             let input = document.getElementById("backward-pawn-moves");
             if (!input.checked)
@@ -53,9 +58,50 @@
         }
 
         register_movement_rule(movement_rule);
+
+        let multiplayer = new Multiplayer();
+        function on_move(src_row, src_col, dst_row, dst_col) {
+            multiplayer.on_move(src_row, src_col, dst_row, dst_col);
+        }
+        function get_player_color() {
+            return multiplayer.color === "white" ? 0 : 1;
+        }
+        init_multiplayer(on_move, get_player_color);
+
         load("chess-ui.wasm");
+
+        let multiplayer_button = document.getElementById("create-multiplayer");
+        let game_link = document.getElementById("game-link");
+        multiplayer.on_opponent_join = (color) => {
+            if (color === "white") {
+                wasm_exports.flip_board(0);
+            } else {
+                wasm_exports.flip_board(1);
+            }
+        };
+        multiplayer.on_opponent_move = (src_row, src_col, dst_row, dst_col) => {
+            wasm_exports.make_move_from_js(src_row, src_col, dst_row, dst_col);
+        };
+        multiplayer_button.onclick = () => {
+            multiplayer.on_created = (game_id) => {
+                let base = location.href.replace(location.hash,"");
+                let url = `${base}#join=${game_id}`;
+                game_link.href = url;
+                game_link.innerText = url;
+            };
+            multiplayer.create();
+        };
+        // Add a slight delay before doing this so the WASM exports have time to load.
+        setTimeout(() => {
+            if (location.hash.startsWith("#join=")) {
+                let game_id = location.hash.substring(6);
+                multiplayer.join(game_id);
+            }
+        }, 100);
     </script>
     <div><input id="backward-pawn-moves" type="checkbox" />Backward pawn moves</div>
+    <div><button id="create-multiplayer">Create Multiplayer Game</button></div>
+    <div>Share link: <a id="game-link" href="#"></a></div>
 </body>
 
 </html>
