@@ -5,7 +5,7 @@ running.
 
 ```bash
 # Build a dev image
-docker build -t chess .
+docker build -f Dockerfile.dev -t chess .
 
 # Do dev in it
 docker run \

@@ -1,19 +1,31 @@
-FROM rust
+# Build: docker build --build-arg BUILDKIT_INLINE_CACHE=1 -t chess-deploy .
+# Run: docker run -it -p 58597:58597 chess-deploy
 
-RUN apt-get update
-RUN apt-get install -y libasound2-dev
+FROM chess as build
 
-RUN rustup default nightly
-RUN rustup target add wasm32-unknown-unknown
-RUN rustup component add rustfmt
-
-WORKDIR /src/chess
 ENV CARGO_HOME=/cargo/home
 ENV CARGO_TARGET_DIR=/cargo/target
 
-RUN mkdir -p /srv/chess \
-    && ln -s /src/chess/ui/index.html /srv/chess \
-    && ln -s /src/chess/ui/assets /srv/chess \
-    && ln -s $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/chess-ui.wasm /srv/chess
+COPY . .
+RUN --mount=type=cache,target=/cargo/home \
+    --mount=type=cache,target=/cargo/target \
+    cargo build --release && \
+    strip $CARGO_TARGET_DIR/release/server && \
+    cp $CARGO_TARGET_DIR/release/server /usr/local/bin/chess-server && \
+    cp --remove-destination $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/*.wasm /srv/chess
 
-ENTRYPOINT ["bash"]
+# ---
+
+FROM debian:sid-slim
+
+ENV CARGO_TARGET_DIR=/cargo/target
+
+RUN mkdir -p /src/chess /srv/chess
+COPY --from=build /src/chess /src/chess
+COPY --from=build /srv/chess /srv/chess
+COPY --from=build /usr/local/bin/chess-server /usr/local/bin
+
+EXPOSE 58597
+ENV RUST_LOG=debug
+
+ENTRYPOINT ["chess-server"]

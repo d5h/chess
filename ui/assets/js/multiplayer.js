@@ -13,20 +13,16 @@ export class Multiplayer {
 
     create() {
         this.close();
-        let host = location.host;
-        this._ws = new WebSocket(`ws://${host}/create`);
-        this._ws.onmessage = (message) => {
+        this._connect(`create`, (message) => {
             this.dispatch(message);
-        }
+        });
     }
 
     join(game_id) {
         this.close();
-        let host = location.host;
-        this._ws = new WebSocket(`ws://${host}/join/${game_id}`);
-        this._ws.onmessage = (message) => {
+        this._connect(`join/${game_id}`, (message) => {
             this.dispatch(message);
-        }
+        });
     }
 
     dispatch(event) {
@@ -76,6 +72,18 @@ export class Multiplayer {
         if (this._ws) {
             this._ws.close();
             this._ws = null;
+        }
+    }
+
+    _connect(path, onmessage) {
+        let host = location.host;
+        this._ws = new WebSocket(`wss://${host}/${path}`);
+        this._ws.onmessage = onmessage;
+        // Do this because wss:// isn't implemented in local dev
+        this._ws.onerror = (evt) => {
+            console.log("Trying ws");
+            this._ws = new WebSocket(`ws://${host}/${path}`);
+            this._ws.onmessage = onmessage;
         }
     }
 }
