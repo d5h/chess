@@ -56,6 +56,8 @@ export class Multiplayer {
             this.on_opponent_move(
                 data.src_row, data.src_col, data.dst_row, data.dst_col
             );
+        } else if (data.rules) {
+            this.on_rules_update(data.rules);
         }
     }
 
@@ -64,6 +66,13 @@ export class Multiplayer {
             let data = JSON.stringify({
                 src_row, src_col, dst_row, dst_col
             });
+            this._ws.send(data);
+        }
+    }
+
+    rules_update(rules) {
+        if (this._ws) {
+            let data = JSON.stringify({"rules": rules});
             this._ws.send(data);
         }
     }

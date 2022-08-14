@@ -68,6 +68,7 @@ extern "C" {
 pub struct MovementRule {
     pub f: Box<dyn MovementRuleFn>,
     pub piece_constrait: Option<char>,
+    pub active: bool,
 }
 
 pub struct Rules<'a> {
@@ -607,6 +608,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "pawn-movement",
             MovementRule {
+                active: true,
                 piece_constrait: Some('p'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -630,6 +632,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "pawn-capture",
             MovementRule {
+                active: true,
                 piece_constrait: Some('p'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -641,6 +644,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "knight",
             MovementRule {
+                active: true,
                 piece_constrait: Some('n'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -652,6 +656,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "bishop",
             MovementRule {
+                active: true,
                 piece_constrait: Some('b'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -663,6 +668,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "rook",
             MovementRule {
+                active: true,
                 piece_constrait: Some('r'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -693,6 +699,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "queen",
             MovementRule {
+                active: true,
                 piece_constrait: Some('q'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -705,6 +712,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "king",
             MovementRule {
+                active: true,
                 piece_constrait: Some('k'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -728,6 +736,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "kingside-castle",
             MovementRule {
+                active: true,
                 piece_constrait: Some('k'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -739,6 +748,7 @@ impl<'a> Rules<'a> {
         hm.insert(
             "queenside-castle",
             MovementRule {
+                active: true,
                 piece_constrait: Some('k'),
                 f: Box::new(
                     |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -751,6 +761,7 @@ impl<'a> Rules<'a> {
             hm.insert(
                 "js-plugin",
                 MovementRule {
+                    active: true,
                     piece_constrait: None,
                     f: Box::new(
                         |p: Piece, pp: &PiecePlacements, gd: GameData, hs: &mut HashSet<Move>| {
@@ -811,7 +822,7 @@ impl<'a> Rules<'a> {
         gd: GameData,
     ) -> HashSet<Move> {
         let mut allowed: HashSet<Move> = HashSet::new();
-        for (_, r) in self.movement_rules.iter() {
+        for (_, r) in self.movement_rules.iter().filter(|(_, r)| r.active) {
             if let Some(p) = r.piece_constrait && p.to_ascii_lowercase() != (piece.name as char).to_ascii_lowercase() {
                 continue;
             }

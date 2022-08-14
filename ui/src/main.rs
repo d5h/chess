@@ -1,14 +1,16 @@
 #![feature(trait_alias)]
 
-use std::{panic, sync::Mutex};
+use std::{collections::HashMap, panic, sync::Mutex};
 
 use macroquad::prelude::*;
 
 mod logging;
+mod mem;
 mod rules;
 mod prelude {
     pub const SQUARE_SIZE: f32 = 90.0; // TODO: get from rules
     pub use crate::logging::*;
+    pub use crate::mem::*;
     pub use crate::rules::*;
 }
 
@@ -55,6 +57,18 @@ static FLIPPED: Mutex<bool> = Mutex::new(false);
 pub extern "C" fn flip_board(flipped: u32) {
     let mut f = FLIPPED.lock().unwrap();
     *f = flipped != 0;
+}
+
+static RULES_UPDATE: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+
+#[no_mangle]
+pub extern "C" fn rules_update(json_str_ptr: *const u8) {
+    let len = memlen(json_str_ptr);
+    let s = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(json_str_ptr, len)) };
+    if let Ok(v) = serde_json::from_str::<HashMap<String, bool>>(s) {
+        let mut r = RULES_UPDATE.lock().unwrap();
+        *r = Some(v);
+    }
 }
 
 // Mouse stuff
@@ -112,9 +126,26 @@ impl<'a> Game<'a> {
     }
 
     pub fn handle_js_changes(&mut self) {
-        let f = FLIPPED.lock().unwrap();
-        self.flipped = *f;
-        self.player = unsafe { get_player_color() };
+        {
+            let f = FLIPPED.lock().unwrap();
+            self.flipped = *f;
+            self.player = unsafe { get_player_color() };
+        }
+
+        {
+            let mut r = RULES_UPDATE.lock().unwrap();
+            if let Some(r) = &*r {
+                for (&n, m) in self.rules.movement_rules.iter_mut() {
+                    if let Some(&a) = r.get(n) {
+                        if m.active != a {
+                            log!("Toggling {} to {}", n, a);
+                            m.active = a;
+                        }
+                    }
+                }
+            }
+            *r = None;
+        }
     }
 
     pub fn draw(&self) {

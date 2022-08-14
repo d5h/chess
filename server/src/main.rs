@@ -6,7 +6,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 use warp::ws::{Message, WebSocket};
-use warp::{http, Filter, Reply};
+use warp::{http, http::Uri, Filter, Reply};
 
 // Need to add player color
 type Player = mpsc::UnboundedSender<Message>;
@@ -45,7 +45,8 @@ async fn main() {
 
     let ui = warp::path("ui").and(warp::fs::dir("/srv/chess"));
 
-    let routes = ui.or(create).or(join);
+    let root = warp::path::end().map(|| warp::redirect(Uri::from_static("/ui/")));
+    let routes = root.or(ui).or(create).or(join);
     warp::serve(routes.with(warp::log("server")))
         .run(([0, 0, 0, 0], 58597))
         .await;

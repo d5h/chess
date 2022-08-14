@@ -24,7 +24,7 @@ cargo build --release  # Only needed if changing ui/ rust code
 RUST_LOG=debug cargo run --release --bin server
 ```
 
-Then visit the ui at http://localhost:58597/ui/index.html.
+Then visit the ui at http://localhost:58597/.
 
 If you're using VS Code, install the
 [remote container extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)

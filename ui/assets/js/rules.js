@@ -36,6 +36,14 @@ export function register_movement_rule(func) {
     rules.movement_rule = func;
 }
 
+export function rules_update(rules) {
+    const json = (new TextEncoder()).encode(JSON.stringify(rules));
+    let strptr = wasm_exports.alloc(json.length);
+    new Uint8Array (wasm_memory.buffer, strptr, json.length).set(json);
+    wasm_exports.rules_update(strptr);
+    wasm_exports.free(strptr);
+}
+
 export function init_rules() {
     register_plugin = function (importObject) {
         importObject.env.movement_plugin = (piece_ptr, placements_ptr, retval_ptr, retval_len) => {

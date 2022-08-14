@@ -133,6 +133,7 @@ name = "chess-ui"
 version = "0.1.0"
 dependencies = [
  "macroquad",
+ "serde_json",
 ]
 
 [[package]]

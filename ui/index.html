@@ -28,7 +28,7 @@
     <!-- Minified and statically hosted version of https://github.com/not-fl3/macroquad/blob/master/js/mq_js_bundle.js -->
     <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
     <script type="module">
-        import { init_rules, register_movement_rule } from "./assets/js/rules.js";
+        import { init_rules, register_movement_rule, rules_update } from "./assets/js/rules.js";
         import { init_multiplayer, Multiplayer } from "./assets/js/multiplayer.js";
 
         // Demo new movement rule
@@ -98,10 +98,47 @@
                 multiplayer.join(game_id);
             }
         }, 100);
+
+        // Keep track of rules
+        var RULES = {};
+        multiplayer.on_rules_update = (rules) => {
+            RULES = rules;
+            for (let r in rules) {
+                // Does not trigger changed event when changed by JS
+                document.getElementById(r).checked = rules[r];
+            }
+            rules_update(RULES);
+        }
+        for (let e of document.getElementsByClassName("rule")) {
+            RULES[e.id] = e.checked;
+            e.addEventListener('change', (event) => {
+                let id = event.currentTarget.id;
+                console.log(`Rule ${id} changed`);
+                if (event.currentTarget.checked) {
+                    RULES[id] = true;
+                } else {
+                    RULES[id] = false;
+                }
+                rules_update(RULES);
+                multiplayer.rules_update(RULES);
+            })
+        }
     </script>
-    <div><input id="backward-pawn-moves" type="checkbox" />Backward pawn moves</div>
     <div><button id="create-multiplayer">Create Multiplayer Game</button></div>
     <div>Share link: <a id="game-link" href="#"></a></div>
+    <h2>Rules</h2>
+    <h3>Standard Rules</h3>
+    <div><input id="pawn-movement" type="checkbox" checked="checked" class="rule" />Forward pawn moves</div>
+    <div><input id="pawn-capture" type="checkbox" checked="checked" class="rule" />Pawn captures</div>
+    <div><input id="knight" type="checkbox" checked="checked" class="rule" />Knight moves</div>
+    <div><input id="bishop" type="checkbox" checked="checked" class="rule" />Bishop moves</div>
+    <div><input id="rook" type="checkbox" checked="checked" class="rule" />Rook moves</div>
+    <div><input id="queen" type="checkbox" checked="checked" class="rule" />Queen moves</div>
+    <div><input id="king" type="checkbox" checked="checked" class="rule" />King moves</div>
+    <div><input id="kingside-castle" type="checkbox" checked="checked" class="rule" />Kingside castle</div>
+    <div><input id="queenside-castle" type="checkbox" checked="checked" class="rule" />Queenside castle</div>
+    <h3>Special Rules</h3>
+    <div><input id="backward-pawn-moves" type="checkbox" class="rule" />Backward pawn moves</div>
 </body>
 
 </html>
