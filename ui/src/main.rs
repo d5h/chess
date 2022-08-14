@@ -307,10 +307,10 @@ async fn main() {
     panic::set_hook(Box::new(hook));
     let mut game = Game::new().await;
     loop {
+        game.handle_js_move();
         game.handle_js_changes();
         game.draw();
         game.handle_input();
-        game.handle_js_move();
         next_frame().await
     }
 }
